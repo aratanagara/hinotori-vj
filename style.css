@@ -1,0 +1,24 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #0b0b0c;
+  color: #eaeaea;
+  font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+}
+#app { position: relative; height: 100vh; overflow: hidden; }
+canvas { display: block; }
+
+.ui {
+  position: absolute;
+  top: 12px; left: 12px; right: 12px;
+  max-width: 880px;
+  padding: 12px 14px;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+}
+.row { display: flex; align-items: center; gap: 10px; margin: 6px 0; flex-wrap: wrap; }
+input[type="range"] { flex: 1; min-width: 220px; }
+#ampv,#freqv,#ethv,#eboostv,#mixv { width: 70px; text-align:right; font-variant-numeric: tabular-nums; opacity:.9;}
+.hint { margin-top: 8px; opacity: 0.75; font-size: 12px; line-height: 1.35; }
