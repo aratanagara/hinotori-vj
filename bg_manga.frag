@@ -1,16 +1,10 @@
 // bg_manga.frag (SAFE: no dynamic indexing on uniform arrays)
-<<<<<<< HEAD
-// - aspect-safe thickness/patterns
-// - inner frame + outer frame
-// - fills: solid black / dots / cloud / noise+speedlines (NO mid-gray fills)
-=======
 // - 24 panels supported
 // - forced bleed: dir >= 4.0  (dir = mod(dir,4))
 // - aspect-safe thickness/patterns
 // - inner frame + outer frame
 // - fills: solid black / dots / cloud / noise+speedlines (NO mid-gray fills)
 
->>>>>>> 56d0bc0 (update)
 #ifdef GL_ES
 precision mediump float;
 precision mediump int;
@@ -23,21 +17,12 @@ uniform float uTime;
 
 uniform int   uCount;
 
-<<<<<<< HEAD
-// 12 * vec4 (x0,y0,x1,y1) packed into float[48]
-uniform float uManga[48];
-// 12 * vec4 (t0,dur,fx,dir) packed into float[48]
-uniform float uAnim[48];
-
-uniform float uBleedChance;
-=======
 // 24 * vec4 (x0,y0,x1,y1) packed into float[96]
 uniform float uManga[96];
 // 24 * vec4 (t0,dur,fx,dir) packed into float[96]
 uniform float uAnim[96];
 
 uniform float uBleedChance;   // "auto corner bleed" probability (still used)
->>>>>>> 56d0bc0 (update)
 uniform float uFramePx;
 uniform float uInnerFramePx;
 uniform float uGutterXPx;
@@ -90,9 +75,6 @@ vec4 getPanel(int i){
   if(i==8)  return vec4(uManga[32], uManga[33], uManga[34], uManga[35]);
   if(i==9)  return vec4(uManga[36], uManga[37], uManga[38], uManga[39]);
   if(i==10) return vec4(uManga[40], uManga[41], uManga[42], uManga[43]);
-<<<<<<< HEAD
-  return          vec4(uManga[44], uManga[45], uManga[46], uManga[47]);
-=======
   if(i==11) return vec4(uManga[44], uManga[45], uManga[46], uManga[47]);
   if(i==12) return vec4(uManga[48], uManga[49], uManga[50], uManga[51]);
   if(i==13) return vec4(uManga[52], uManga[53], uManga[54], uManga[55]);
@@ -106,7 +88,6 @@ vec4 getPanel(int i){
   if(i==21) return vec4(uManga[84], uManga[85], uManga[86], uManga[87]);
   if(i==22) return vec4(uManga[88], uManga[89], uManga[90], uManga[91]);
   return          vec4(uManga[92], uManga[93], uManga[94], uManga[95]);
->>>>>>> 56d0bc0 (update)
 }
 vec4 getAnim(int i){
   if(i==0)  return vec4(uAnim[0],  uAnim[1],  uAnim[2],  uAnim[3]);
@@ -120,9 +101,6 @@ vec4 getAnim(int i){
   if(i==8)  return vec4(uAnim[32], uAnim[33], uAnim[34], uAnim[35]);
   if(i==9)  return vec4(uAnim[36], uAnim[37], uAnim[38], uAnim[39]);
   if(i==10) return vec4(uAnim[40], uAnim[41], uAnim[42], uAnim[43]);
-<<<<<<< HEAD
-  return          vec4(uAnim[44], uAnim[45], uAnim[46], uAnim[47]);
-=======
   if(i==11) return vec4(uAnim[44], uAnim[45], uAnim[46], uAnim[47]);
   if(i==12) return vec4(uAnim[48], uAnim[49], uAnim[50], uAnim[51]);
   if(i==13) return vec4(uAnim[52], uAnim[53], uAnim[54], uAnim[55]);
@@ -136,17 +114,11 @@ vec4 getAnim(int i){
   if(i==21) return vec4(uAnim[84], uAnim[85], uAnim[86], uAnim[87]);
   if(i==22) return vec4(uAnim[88], uAnim[89], uAnim[90], uAnim[91]);
   return          vec4(uAnim[92], uAnim[93], uAnim[94], uAnim[95]);
->>>>>>> 56d0bc0 (update)
 }
 
 // --------------------
 // tones (pixel-safe, no mid-gray fills)
 // --------------------
-<<<<<<< HEAD
-
-// round halftone dots
-=======
->>>>>>> 56d0bc0 (update)
 float toneDots(vec2 fc, float density, float seed){
   vec2 p  = fc / density;
   vec2 ip = floor(p);
@@ -154,15 +126,8 @@ float toneDots(vec2 fc, float density, float seed){
   float r = 0.20 + 0.22 * hash21(ip + seed * 17.0);
   float d = length(fp);
   float m = smoothstep(r, r - 0.07, d);
-<<<<<<< HEAD
-  return m; // 1 inside dot
-}
-
-// value noise
-=======
   return m;
 }
->>>>>>> 56d0bc0 (update)
 float vnoise(vec2 p){
   vec2 i = floor(p);
   vec2 f = fract(p);
@@ -183,29 +148,15 @@ float fbm(vec2 p){
   }
   return n;
 }
-<<<<<<< HEAD
-// cloud-ish blobs (binary-ish)
-=======
->>>>>>> 56d0bc0 (update)
 float toneCloud(vec2 fc, float scale, float seed){
   vec2 p = (fc / scale) + vec2(seed*7.1, seed*3.7);
   float n = fbm(p);
   return smoothstep(0.50, 0.74, n);
 }
-<<<<<<< HEAD
-
-// gritty noise (binary)
-=======
->>>>>>> 56d0bc0 (update)
 float toneNoise(vec2 fc, float seed){
   float n = hash21(floor(fc) + seed*19.3);
   return step(0.55, n);
 }
-<<<<<<< HEAD
-
-// radial speedlines in panel local
-=======
->>>>>>> 56d0bc0 (update)
 float toneSpeed(vec2 local01, float seed){
   vec2 c = local01 - 0.5;
   float ang = atan(c.y, c.x);
@@ -238,11 +189,7 @@ void main() {
   vec4  bestRect  = vec4(0.0);
   vec2  bestLocal = vec2(0.0);
 
-<<<<<<< HEAD
-  for (int i = 0; i < 12; i++){
-=======
   for (int i = 0; i < 24; i++){
->>>>>>> 56d0bc0 (update)
     if (i >= uCount) break;
 
     vec4 r = getPanel(i);
@@ -251,15 +198,11 @@ void main() {
     float t0  = a.x;
     float dur = max(a.y, 0.001);
     float fx  = a.z;
-<<<<<<< HEAD
-    float dir = a.w;
-=======
     float dirPacked = a.w;
 
     // ---- forced bleed flag ----
     float forcedBleed = step(4.0, dirPacked);
     float dir = mod(dirPacked, 4.0);
->>>>>>> 56d0bc0 (update)
 
     float x = (uTime - t0) / dur;
     float e = easeOutQuintBound(x);
@@ -271,16 +214,11 @@ void main() {
       (r.x < 0.02 && r.w > 0.98) ||
       (r.z > 0.98 && r.w > 0.98) ? 1.0 : 0.0;
 
-<<<<<<< HEAD
-    float bleed = step(0.5, cornerish) * step(hash11(float(i) + 7.0), uBleedChance);
-
-=======
     // auto bleed only for corners (optional), OR forced bleed
     float autoBleed = step(0.5, cornerish) * step(hash11(float(i) + 7.0), uBleedChance);
     float bleed = max(forcedBleed, autoBleed);
 
     // gutters: if bleed and edge touches page, gutter becomes 0 on that side
->>>>>>> 56d0bc0 (update)
     float gL = gutterX, gR = gutterX, gT = gutterY, gB = gutterY;
     if (bleed > 0.5){
       if (r.x <= 0.0005) gL = 0.0;
@@ -298,14 +236,9 @@ void main() {
     vec2 hsA = hs;
 
     if (fx < 0.5) {
-<<<<<<< HEAD
-      // fade
-    } else if (fx < 1.5) {
-=======
       // fade only
     } else if (fx < 1.5) {
       // slide
->>>>>>> 56d0bc0 (update)
       vec2 offs = vec2(0.0);
       if      (dir < 0.5) offs = vec2(-1.2, 0.0);
       else if (dir < 1.5) offs = vec2( 1.2, 0.0);
@@ -313,10 +246,7 @@ void main() {
       else                offs = vec2( 0.0, 1.2);
       cA = mix(c + offs, c, e);
     } else {
-<<<<<<< HEAD
-=======
       // pop
->>>>>>> 56d0bc0 (update)
       float s = mix(0.05, 1.0, e);
       hsA = hs * s;
     }
@@ -350,11 +280,7 @@ void main() {
     float black = 0.0;
 
     if (pick < 0.20) {
-<<<<<<< HEAD
-      black = 1.0; // ベタ
-=======
       black = 1.0;
->>>>>>> 56d0bc0 (update)
     } else if (pick < 0.52) {
       float dens = mix(7.0, 14.0, hash11(sid + 21.0));
       black = toneDots(fc, dens, seed);
