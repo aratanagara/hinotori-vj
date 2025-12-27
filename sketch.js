@@ -1,21 +1,38 @@
+<<<<<<< HEAD
 // sketch.js (FULL) 2025-12-26 (renderer-safe)
 // - bgMode=9 : manga shader -> pgManga -> hinotori.frag の bgManga として合成
 // - manga は BEAT同期（uTime = beatLocal）
 // - useProgram対策：copyToContextを使わず、各pgのrenderer上で createShader(vertSrc, fragSrc) を生成
 // -------------------------------------------------
+=======
+// sketch.js (FULL) 2025-12-27 (renderer-safe)
+// - bgMode=9 : manga shader -> pgManga -> hinotori.frag の bgManga として合成
+// - manga は BEAT同期（uTime = beatLocal）
+// - useProgram対策：copyToContextを使わず、各pgのrenderer上で createShader(vertSrc, fragSrc) を生成
+// - 断ちきり：dir += 4 を “forced bleed” として shader 側で解釈（重なり回避のため「属性化」）
+>>>>>>> 56d0bc0 (update)
 
 let hinotori, inkelly;
 
 // loaded (main renderer) shaders
 let shDisplayLoaded;   // hinotori.vert + hinotori.frag
+<<<<<<< HEAD
 let shStateLoaded;     // hinotori.vert + bg_inkelly_state.frag（inkelly state）
 let shMangaLoaded;     // bg_manga.vert + bg_manga.frag（bgMode=9用）
+=======
+let shStateLoaded;     // hinotori.vert + bg_inkelly_state.frag
+let shMangaLoaded;     // hinotori.vert + bg_manga.frag
+>>>>>>> 56d0bc0 (update)
 
 // runtime shaders (per-renderer)
 let shDisplay;     // for main canvas
 let shInkellyA;    // for pgA
 let shInkellyB;    // for pgB
+<<<<<<< HEAD
 let shManga;    // for pgManga
+=======
+let shManga;       // for pgManga
+>>>>>>> 56d0bc0 (update)
 
 // ping-pong (inkelly state)
 let pgA, pgB;
@@ -32,8 +49,11 @@ let bgMode = 0;   // 0..9
 let paletteMode = 0; // 0 normal, 1 r, 2 g, 3 b, 4 k(tone)
 
 let center = { x: 0.5, y: 0.5 };
+<<<<<<< HEAD
 
 // visual
+=======
+>>>>>>> 56d0bc0 (update)
 let showHinotori = true;
 
 // rings
@@ -81,12 +101,23 @@ let curlAmt = 0.010;
 let spawnStrength = 1.0;
 let decay = 0.30;
 
+<<<<<<< HEAD
 // bgMode=9 manga params
 const PANELS_MAX = 12;
+=======
+// ---------------------------
+// bgMode=9 manga params
+// ---------------------------
+const PANELS_MAX_SINGLE = 12;
+const PANELS_MAX_SPREAD = 24;
+const PANELS_MAX = 24;
+
+>>>>>>> 56d0bc0 (update)
 let manga = [];
 let lastMangaCycle = -1;
 let mangaCycleBeats = 4.0;
 
+<<<<<<< HEAD
 let mangaBleedChance = 0.2;
 let mangaFramePx = 1.0;
 let mangaGutterXPx = 4.0;
@@ -95,12 +126,30 @@ let mangaInnerPx = 4.0;
 let mangaInnerInsetPx = 72.0;
 let mangaToneAmt = 1.0;
 let mangaInnerFramePx = 1.0;
+=======
+// ★断ちきりが「出ない」を潰す：auto corner bleed を強めに（forced は別）
+let mangaBleedChance = 0.35;     // auto corner bleed（補助）
+let mangaForcedBleedPerPage = 1; // 各ページ最低いくつ forced bleed を作るか
+
+let mangaFramePx = 1.0;
+let mangaInnerFramePx = 1.0;
+
+// コマ間余白（縦横別）
+let mangaGutterXPx = 3.0;
+let mangaGutterYPx = 12.0;
+
+let mangaToneAmt = 1.0;
+
+>>>>>>> 56d0bc0 (update)
 // page inset / spread
 let mangaPageInsetXPx = 36.0;  // ページの左右余白（内枠用）
 let mangaPageInsetYPx = 36.0;  // ページの上下余白（内枠用）
 let mangaSpinePx      = 12.0;  // 見開きのノド（中央の余白）
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 56d0bc0 (update)
 // UI
 let uiRoot;
 let bgSlider, bpmSlider, beatSlider;
@@ -119,13 +168,19 @@ const BEAT_OPTIONS = [0, 1, 2, 4, 8];
 
 // helpers
 function fract(x){ return x - Math.floor(x); }
+<<<<<<< HEAD
 
+=======
+>>>>>>> 56d0bc0 (update)
 function smoothFade01(x, powK = 1.0) {
   x = constrain(x, 0, 1);
   x = x*x*(3 - 2*x);
   return Math.pow(x, powK);
 }
+<<<<<<< HEAD
 
+=======
+>>>>>>> 56d0bc0 (update)
 function pickPaletteRGB(x) {
   x = ((x % 1) + 1) % 1;
   const P = [
@@ -140,6 +195,7 @@ function pickPaletteRGB(x) {
   return P[Math.floor(x * P.length)];
 }
 
+<<<<<<< HEAD
 // ---------------------------
 // manga layout (0..1 coords)
 // ---------------------------
@@ -148,10 +204,16 @@ function randWeights(n, lo, hi){
   for (let i = 0; i < n; i++){
     a.push(lo + Math.random() * (hi - lo));
   }
+=======
+function randWeights(n, lo, hi){
+  const a = [];
+  for (let i = 0; i < n; i++) a.push(lo + Math.random() * (hi - lo));
+>>>>>>> 56d0bc0 (update)
   const s = a.reduce((p,c)=>p+c, 0);
   return a.map(v => v / s);
 }
 
+<<<<<<< HEAD
 function pickSpan(maxSpan, biasSmall){
   if (maxSpan <= 1) return 1;
   const r = Math.random();
@@ -377,12 +439,206 @@ function rebuildMangaLayout(globalTBeats){
       if(touchesR) p.x1 = pageX1;
       if(touchesT) p.y0 = 0.0;
       if(touchesB) p.y1 = 1.0;
+=======
+function isSpread(){
+  return (windowWidth / Math.max(1, windowHeight)) > 1.15;
+}
+
+// ---------------------------
+// layout helpers
+// ---------------------------
+function clamp01(v){ return Math.max(0, Math.min(1, v)); }
+
+function rectArea(r){
+  return Math.max(0, r.x1 - r.x0) * Math.max(0, r.y1 - r.y0);
+}
+
+function dist2(ax, ay, bx, by){
+  const dx = ax - bx, dy = ay - by;
+  return dx*dx + dy*dy;
+}
+
+// 「角に近いコマ」を探して forced bleed 化（重なり無し）
+function forceBleedNearCorners(panels, pageRect, howMany){
+  // corners in global uv
+  const corners = [
+    {x: pageRect.x0, y: pageRect.y0}, // TL
+    {x: pageRect.x1, y: pageRect.y0}, // TR
+    {x: pageRect.x0, y: pageRect.y1}, // BL
+    {x: pageRect.x1, y: pageRect.y1}, // BR
+  ];
+
+  // 候補：面積が小さすぎない、ページ内にある程度いる
+  const cand = panels
+    .map((p, idx) => ({p, idx, a: rectArea(p)}))
+    .filter(o => o.a > 0.01);
+
+  if (cand.length === 0) return;
+
+  let forced = 0;
+
+  // 角ごとに「最も近いコマ」を選ぶ（同じコマが複数角に選ばれたら次へ）
+  const used = new Set();
+  for (let c = 0; c < corners.length && forced < howMany; c++){
+    const cx = corners[c].x;
+    const cy = corners[c].y;
+
+    cand.sort((A, B) => {
+      const acx = (A.p.x0 + A.p.x1) * 0.5;
+      const acy = (A.p.y0 + A.p.y1) * 0.5;
+      const bcx = (B.p.x0 + B.p.x1) * 0.5;
+      const bcy = (B.p.y0 + B.p.y1) * 0.5;
+      return dist2(acx, acy, cx, cy) - dist2(bcx, bcy, cx, cy);
+    });
+
+    for (const o of cand){
+      if (used.has(o.idx)) continue;
+      used.add(o.idx);
+
+      // dir に +4 して forced bleed フラグ化（shader側で解釈）
+      o.p.dir = (o.p.dir % 4) + 4;
+      forced++;
+      break;
+    }
+  }
+
+  // まだ足りなければ、残り候補から適当に forced
+  while (forced < howMany && cand.length > 0){
+    const o = cand[Math.floor(Math.random() * cand.length)];
+    if (!used.has(o.idx)){
+      used.add(o.idx);
+      o.p.dir = (o.p.dir % 4) + 4;
+      forced++;
+    } else break;
+  }
+}
+
+// ---------------------------
+// rebuild manga layout
+// - spread: left/right pages separated by mangaSpinePx
+// - per page: rows max 3, cols max 4
+// - max panels: 12 single, 24 spread
+// - forced bleed is "attribute" on existing panels (no overlap)
+// ---------------------------
+function rebuildMangaLayout(globalTBeats){
+  manga = [];
+
+  const spread = isSpread();
+  const maxPanels = spread ? PANELS_MAX_SPREAD : PANELS_MAX_SINGLE;
+
+  // spine gap in uv
+  const spineUv = (mangaSpinePx / Math.max(1, fbW));   // total gap width (uv)
+  const halfGap = spineUv * 0.5;
+
+  // page rects in global uv
+  const pages = [];
+  if (!spread){
+    pages.push({ x0: 0.0, x1: 1.0, y0: 0.0, y1: 1.0 });
+  } else {
+    pages.push({ x0: 0.0,          x1: 0.5 - halfGap, y0: 0.0, y1: 1.0 }); // left
+    pages.push({ x0: 0.5 + halfGap, x1: 1.0,          y0: 0.0, y1: 1.0 }); // right
+  }
+
+  // build one page panels
+  function buildPage(pageRect){
+    // page inset in uv (inside that page)
+    const pageW = Math.max(1e-6, pageRect.x1 - pageRect.x0);
+    const pageH = Math.max(1e-6, pageRect.y1 - pageRect.y0);
+
+    const insetXuv = (mangaPageInsetXPx / Math.max(1, fbW)) * pageW;
+    const insetYuv = (mangaPageInsetYPx / Math.max(1, fbH)) * pageH;
+
+    const xMin = pageRect.x0 + insetXuv;
+    const xMax = pageRect.x1 - insetXuv;
+    const yMin = pageRect.y0 + insetYuv;
+    const yMax = pageRect.y1 - insetYuv;
+
+    // rows 1..3 (MAX 3)
+    const rows = 1 + Math.floor(Math.random() * 4);
+    const rowH = randWeights(rows, 0.60, 2.20);
+
+    // y ranges
+    const y0s = [];
+    let accY = 0;
+    for(let r=0;r<rows;r++){ y0s[r] = accY; accY += rowH[r]; }
+    for(let r=0;r<rows;r++){
+      const ry0 = (y0s[r]/accY);
+      const rh  = (rowH[r]/accY);
+      y0s[r] = yMin + ry0 * (yMax - yMin);
+      rowH[r] = rh * (yMax - yMin);
+    }
+
+    const pagePanels = [];
+
+    for(let r=0;r<rows;r++){
+      const yy0 = y0s[r];
+      const yy1 = yy0 + rowH[r];
+
+      // cols 1..4 (MAX 4)
+      const cols = 1 + Math.floor(Math.random() * 3);
+      const colW = randWeights(cols, 0.55, 2.40).map(v => v * (xMax - xMin));
+
+      // 右→左
+      let xRight = xMax;
+      for(let c=0;c<cols;c++){
+        const ww = Math.max((xMax - xMin) * 0.12, colW[c]);
+        const x1 = xRight;
+        const x0 = xRight - ww;
+        xRight = x0;
+
+        const isLast = (c === cols - 1);
+        const xx0 = isLast ? xMin : Math.max(xMin, x0);
+        const xx1 = isLast ? x1   : Math.min(xMax, x1);
+
+        const pick = Math.random();
+        const fxForShader = (pick < 0.40) ? 2.0 : (pick < 0.70 ? 1.0 : 0.0);
+        const dir = Math.floor(Math.random() * 4);
+
+        const t0  = globalTBeats + (Math.random() * 0.20);
+        const dur = 1.60 + Math.random() * 0.50;
+
+        const p = { x0: xx0, y0: yy0, x1: xx1, y1: yy1, t0, dur, fx: fxForShader, dir };
+        pagePanels.push(p);
+        if (manga.length + pagePanels.length >= maxPanels) break;
+      }
+      if (manga.length + pagePanels.length >= maxPanels) break;
+    }
+
+    // ★断ちきり保証：このページの角近傍から forced bleed を最低 mangaForcedBleedPerPage 個
+    // （ページ内枠の外へ伸ばす効果は shader 側で "gutter 0" になるので、見た目がちゃんと断ちきりになる）
+    forceBleedNearCorners(pagePanels, pageRect, mangaForcedBleedPerPage);
+
+    // push
+    for (const p of pagePanels){
+      manga.push(p);
+      if (manga.length >= maxPanels) break;
+    }
+  }
+
+  for (let i=0;i<pages.length;i++){
+    if (manga.length >= maxPanels) break;
+    buildPage(pages[i]);
+  }
+
+  // 仕上げ：たまに “auto corner bleed” も効くように corners を少しだけページ端に寄せる（控えめ）
+  // forced bleed が主役なので、これは軽く。
+  for (const p of manga){
+    if ((p.dir|0) >= 4){
+      // forced bleed は完全にページ端へ吸着（断ちきりの見た目を確実に）
+      if (p.x0 < 0.03) p.x0 = 0.0;
+      if (p.y0 < 0.03) p.y0 = 0.0;
+      if (p.x1 > 0.97) p.x1 = 1.0;
+      if (p.y1 > 0.97) p.y1 = 1.0;
+>>>>>>> 56d0bc0 (update)
     }
   }
 }
 
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> 56d0bc0 (update)
 // preload
 function preload(){
   hinotori = loadImage("hinotori.png");
@@ -398,11 +654,15 @@ function makeShaderOn(pgOrMainRenderer, loadedShader){
   const vert = loadedShader._vertSrc;
   const frag = loadedShader._fragSrc;
 
+<<<<<<< HEAD
   // main canvas: createShader
   if (!pgOrMainRenderer) {
     return createShader(vert, frag);
   }
   // graphics: pg.createShader
+=======
+  if (!pgOrMainRenderer) return createShader(vert, frag);
+>>>>>>> 56d0bc0 (update)
   return pgOrMainRenderer.createShader(vert, frag);
 }
 
@@ -414,12 +674,18 @@ function setup() {
   cnv.elt.tabIndex = 1;
   cnv.elt.focus();
 
+<<<<<<< HEAD
   // main shader (main renderer上で再生成)
+=======
+>>>>>>> 56d0bc0 (update)
   shDisplay = makeShaderOn(null, shDisplayLoaded);
 
   initBuffers();
 
+<<<<<<< HEAD
   // 初回レイアウト
+=======
+>>>>>>> 56d0bc0 (update)
   rebuildMangaLayout(0.0);
 
   // ==============================
@@ -438,6 +704,7 @@ function setup() {
     z-index: 10;
   `);
 
+<<<<<<< HEAD
   // ---- BG row ----
   const bgRow = createDiv().parent(uiRoot);
   bgRow.style(`display:flex; align-items:center; gap:6px;`);
@@ -452,6 +719,16 @@ function setup() {
   `);
 
   // 1..10（bgMode 0..9）
+=======
+  const bgRow = createDiv().parent(uiRoot);
+  bgRow.style(`display:flex; align-items:center; gap:6px;`);
+
+  createSpan("BG").parent(bgRow).style(`width:${LABEL_W}px; color:#fff; font-size:12px;`);
+
+  bgValueSpan = createSpan(String(bgMode + 1)).parent(bgRow);
+  bgValueSpan.style(`width:${VALUE_W}px; text-align:right; color:#fff; font-size:12px; opacity:0.9;`);
+
+>>>>>>> 56d0bc0 (update)
   bgSlider = createSlider(1, 10, bgMode + 1, 1).parent(bgRow);
   bgSlider.style(`width:${sliderWidth()}px;`);
   bgSlider.input(() => {
@@ -460,6 +737,7 @@ function setup() {
     showUI();
   });
 
+<<<<<<< HEAD
   // ---- BPM row ----
   const bpmRow = createDiv().parent(uiRoot);
   bpmRow.style(`display:flex; align-items:center; gap:6px; margin-top:6px;`);
@@ -472,6 +750,15 @@ function setup() {
   bpmValueSpan.style(`
     width:${VALUE_W}px; text-align:right; color:#fff; font-size:12px; opacity:0.9;
   `);
+=======
+  const bpmRow = createDiv().parent(uiRoot);
+  bpmRow.style(`display:flex; align-items:center; gap:6px; margin-top:6px;`);
+
+  createSpan("BPM").parent(bpmRow).style(`width:${LABEL_W}px; color:#fff; font-size:12px;`);
+
+  bpmValueSpan = createSpan(String(BPM)).parent(bpmRow);
+  bpmValueSpan.style(`width:${VALUE_W}px; text-align:right; color:#fff; font-size:12px; opacity:0.9;`);
+>>>>>>> 56d0bc0 (update)
 
   bpmSlider = createSlider(60, 200, BPM, 1).parent(bpmRow);
   bpmSlider.style(`width:${sliderWidth()}px;`);
@@ -481,6 +768,7 @@ function setup() {
     showUI();
   });
 
+<<<<<<< HEAD
   // ---- BEAT row ----
   const beatRow = createDiv().parent(uiRoot);
   beatRow.style(`display:flex; align-items:center; gap:6px; margin-top:6px;`);
@@ -493,6 +781,15 @@ function setup() {
   beatValueSpan.style(`
     width:${VALUE_W}px; text-align:right; color:#fff; font-size:12px; opacity:0.9;
   `);
+=======
+  const beatRow = createDiv().parent(uiRoot);
+  beatRow.style(`display:flex; align-items:center; gap:6px; margin-top:6px;`);
+
+  createSpan("BEAT").parent(beatRow).style(`width:${LABEL_W}px; color:#fff; font-size:12px;`);
+
+  beatValueSpan = createSpan(String(BEAT_DIV)).parent(beatRow);
+  beatValueSpan.style(`width:${VALUE_W}px; text-align:right; color:#fff; font-size:12px; opacity:0.9;`);
+>>>>>>> 56d0bc0 (update)
 
   beatSlider = createSlider(0, BEAT_OPTIONS.length - 1, 3, 1).parent(beatRow);
   beatSlider.style(`width:${sliderWidth()}px;`);
@@ -502,22 +799,32 @@ function setup() {
     showUI();
   });
 
+<<<<<<< HEAD
   // ---- Hinotori toggle ----
+=======
+>>>>>>> 56d0bc0 (update)
   const hinoRow = createDiv().parent(uiRoot);
   hinoRow.style(`margin-top:6px; display:flex;`);
 
   hinoBtn = createButton("").parent(hinoRow);
+<<<<<<< HEAD
   hinoBtn.style(`
     flex:1; height:32px; font-size:14px;
     border:1px solid #555; border-radius:4px;
   `);
+=======
+  hinoBtn.style(`flex:1; height:32px; font-size:14px; border:1px solid #555; border-radius:4px;`);
+>>>>>>> 56d0bc0 (update)
   hinoBtn.mousePressed(() => {
     showHinotori = !showHinotori;
     syncUI_All();
     showUI();
   });
 
+<<<<<<< HEAD
   // ---- palette buttons ----
+=======
+>>>>>>> 56d0bc0 (update)
   const palWrap = createDiv().parent(uiRoot);
   palWrap.style("margin-top:6px; display:flex; gap:6px;");
 
@@ -531,11 +838,15 @@ function setup() {
 
   pals.forEach(p => {
     const b = createButton(p.key).parent(palWrap);
+<<<<<<< HEAD
     b.style(`
       flex:1; height:32px; font-size:14px;
       background:#222; color:#fff;
       border:1px solid #555; border-radius:4px;
     `);
+=======
+    b.style(`flex:1; height:32px; font-size:14px; background:#222; color:#fff; border:1px solid #555; border-radius:4px;`);
+>>>>>>> 56d0bc0 (update)
     b.mousePressed(() => {
       paletteMode = p.mode;
       syncUI_All();
@@ -544,7 +855,10 @@ function setup() {
     palButtons[p.mode] = b;
   });
 
+<<<<<<< HEAD
   // canvas tapでUI切替
+=======
+>>>>>>> 56d0bc0 (update)
   const c = document.querySelector("canvas");
   c.addEventListener("pointerdown", () => toggleUI());
 
@@ -556,21 +870,31 @@ function initBuffers(){
   fbW = Math.max(16, Math.floor(windowWidth  * scale));
   fbH = Math.max(16, Math.floor(windowHeight * scale));
 
+<<<<<<< HEAD
   // pingpong
+=======
+>>>>>>> 56d0bc0 (update)
   pgA = createGraphics(fbW, fbH, WEBGL);
   pgB = createGraphics(fbW, fbH, WEBGL);
   pgA.noStroke(); pgB.noStroke();
   pgA.pixelDensity(1); pgB.pixelDensity(1);
 
+<<<<<<< HEAD
   // ★各pg上で shader 再生成（renderer事故を根絶）
   shInkellyA = makeShaderOn(pgA, shStateLoaded);
   shInkellyB = makeShaderOn(pgB, shStateLoaded);
 
   pgA.clear(); pgB.clear();
+=======
+  shInkellyA = makeShaderOn(pgA, shStateLoaded);
+  shInkellyB = makeShaderOn(pgB, shStateLoaded);
+
+>>>>>>> 56d0bc0 (update)
   pgA.background(0);
   pgB.background(0);
   ping = 0;
 
+<<<<<<< HEAD
   // manga
   pgManga = createGraphics(fbW, fbH, WEBGL);
   pgManga.noStroke();
@@ -595,15 +919,32 @@ function computeBeatLocal(tSec){
     // 4拍基準
     return tSec * (BPM / 60.0) * (BEAT_DIV / 4.0);
   }
+=======
+  pgManga = createGraphics(fbW, fbH, WEBGL);
+  pgManga.noStroke();
+  pgManga.pixelDensity(1);
+  pgManga.background(255);
+
+  shManga = makeShaderOn(pgManga, shMangaLoaded);
+}
+
+function computeBeatLocal(tSec){
+  if (BEAT_DIV === 0) return tSec * 0.66;
+  return tSec * (BPM / 60.0) * (BEAT_DIV / 4.0);
+>>>>>>> 56d0bc0 (update)
 }
 
 function draw() {
   const t = millis() * 0.001;
   const beatLocal = computeBeatLocal(t);
 
+<<<<<<< HEAD
   // ---------------------------
   // A) ping-pong update (inkelly state)
   // ---------------------------
+=======
+  // A) ping-pong update (inkelly state)
+>>>>>>> 56d0bc0 (update)
   {
     const src = ping ? pgA : pgB;
     const dst = ping ? pgB : pgA;
@@ -628,12 +969,16 @@ function draw() {
   }
   const stateTex = (ping === 0) ? pgA : pgB;
 
+<<<<<<< HEAD
   // ---------------------------
   // B) bgMode=9 manga render -> pgManga
   // ---------------------------
   // ---------------------------
   // B) bgMode=9 manga render -> pgManga
   // ---------------------------
+=======
+  // B) bgMode=9 manga render -> pgManga
+>>>>>>> 56d0bc0 (update)
   {
     const cyc = Math.max(0.001, mangaCycleBeats);
     const cycIndex = Math.floor(beatLocal / cyc);
@@ -642,16 +987,24 @@ function draw() {
       rebuildMangaLayout(beatLocal);
     }
 
+<<<<<<< HEAD
     // ★ pgManga 上で shader を生成しておく（initBuffersで）
     // shManga = makeShaderOn(pgManga, shMangaLoaded);
 
+=======
+>>>>>>> 56d0bc0 (update)
     pgManga.shader(shManga);
 
     const n = Math.min(manga.length, PANELS_MAX);
 
+<<<<<<< HEAD
     // float[48] を作る（shader側が float配列なので）
     const uM = new Array(48).fill(0);
     const uA = new Array(48).fill(0);
+=======
+    const uM = new Array(96).fill(0);
+    const uA = new Array(96).fill(0);
+>>>>>>> 56d0bc0 (update)
 
     for(let i=0;i<n;i++){
       const p = manga[i];
@@ -663,7 +1016,11 @@ function draw() {
       uA[i*4+0] = p.t0;
       uA[i*4+1] = p.dur;
       uA[i*4+2] = p.fx;
+<<<<<<< HEAD
       uA[i*4+3] = p.dir;
+=======
+      uA[i*4+3] = p.dir; // ★ dir>=4 が forced bleed
+>>>>>>> 56d0bc0 (update)
     }
 
     shManga.setUniform("uResolution", [fbW, fbH]);
@@ -673,7 +1030,10 @@ function draw() {
     shManga.setUniform("uManga", uM);
     shManga.setUniform("uAnim",  uA);
 
+<<<<<<< HEAD
     // ★縦横別ガター + 内枠
+=======
+>>>>>>> 56d0bc0 (update)
     shManga.setUniform("uBleedChance", mangaBleedChance);
     shManga.setUniform("uFramePx", mangaFramePx);
     shManga.setUniform("uInnerFramePx", mangaInnerFramePx);
@@ -681,6 +1041,7 @@ function draw() {
     shManga.setUniform("uGutterYPx", mangaGutterYPx);
     shManga.setUniform("uToneAmt", mangaToneAmt);
 
+<<<<<<< HEAD
 
     pgManga.rect(-fbW/2, -fbH/2, fbW, fbH);
   }
@@ -692,12 +1053,23 @@ function draw() {
   shader(shDisplay);
 
   // ink gray triangle wave
+=======
+    pgManga.rect(-fbW/2, -fbH/2, fbW, fbH);
+  }
+
+  // C) main render (display)
+  shader(shDisplay);
+
+>>>>>>> 56d0bc0 (update)
   const phase = (beatLocal / inkCycleBeats) % 1.0;
   let tri = 1.0 - Math.abs(2.0 * phase - 1.0);
   tri = Math.pow(tri, grayCurvePow);
   const g = lerp(grayMin, grayMax, tri);
 
+<<<<<<< HEAD
   // hueBase bpm synced fade
+=======
+>>>>>>> 56d0bc0 (update)
   const hueStep = Math.floor(beatLocal / hueCycleBeats);
   if (hueStep !== hueStepPrev) {
     hueStepPrev = hueStep;
@@ -765,14 +1137,20 @@ function draw() {
 }
 
 function keyPressed() {
+<<<<<<< HEAD
   // 1..9 => 0..8
+=======
+>>>>>>> 56d0bc0 (update)
   if (key >= '1' && key <= '9') {
     const v = parseInt(key, 10);
     bgMode = v - 1;
     syncUI_All();
     showUI();
   }
+<<<<<<< HEAD
   // 0 => 9
+=======
+>>>>>>> 56d0bc0 (update)
   if (key === '0') {
     bgMode = 9;
     syncUI_All();
@@ -799,9 +1177,13 @@ function keyPressed() {
   }
 }
 
+<<<<<<< HEAD
 // ---------------------------
 // UI sync
 // ---------------------------
+=======
+// UI sync
+>>>>>>> 56d0bc0 (update)
 function syncUI_All(){
   if(bgValueSpan) bgValueSpan.html(String(bgMode + 1));
   if(bgSlider) bgSlider.value(bgMode + 1);
@@ -857,16 +1239,23 @@ function toggleUI(){
 
 function sliderWidth() {
   const SIDE_PAD = 24;
+<<<<<<< HEAD
   return max(
     120,
     windowWidth - LABEL_W - VALUE_W - GAP_W - SIDE_PAD
   );
+=======
+  return max(120, windowWidth - LABEL_W - VALUE_W - GAP_W - SIDE_PAD);
+>>>>>>> 56d0bc0 (update)
 }
 
 function windowResized(){
   resizeCanvas(windowWidth, windowHeight);
 
+<<<<<<< HEAD
   // ★FBO再作成（renderer違い事故を避ける）
+=======
+>>>>>>> 56d0bc0 (update)
   initBuffers();
   lastMangaCycle = -1;
 

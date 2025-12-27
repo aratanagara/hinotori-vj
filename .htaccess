@@ -1,0 +1,130 @@
+# =========================
+# 0) まず安全運用（任意）
+# =========================
+# ETagが悪さする環境があるので無効化（必要なら）
+<IfModule mod_headers.c>
+  Header unset ETag
+</IfModule>
+FileETag None
+
+
+# =========================
+# 1) WebP 自動配信（jpg/png → webp）
+# =========================
+<IfModule mod_setenvif.c>
+  # jpg/png リクエストだけ Vary を付けるためのフラグ
+  SetEnvIf Request_URI "\.(jpe?g|png)$" _image_request
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Accept: image/webp を受け取れる＆同名 .webp が存在する時だけ差し替え
+  RewriteCond %{HTTP_ACCEPT} image/webp [NC]
+  RewriteCond %{REQUEST_FILENAME}.webp -f
+  RewriteRule ^(.+)\.(jpe?g|png)$ $1.$2.webp [T=image/webp,E=IS_WEBP:1,L]
+</IfModule>
+
+<IfModule mod_headers.c>
+  # WebP / 非WebPの分岐があるので Vary: Accept を返す
+  Header merge Vary Accept env=_image_request
+</IfModule>
+
+<IfModule mod_mime.c>
+  AddType image/webp .webp
+</IfModule>
+
+
+# =========================
+# 2) 圧縮
+# =========================
+<IfModule mod_deflate.c>
+  <IfModule mod_filter.c>
+    AddOutputFilterByType DEFLATE text/html text/xml text/css text/plain
+    AddOutputFilterByType DEFLATE image/svg+xml application/xhtml+xml application/xml
+    AddOutputFilterByType DEFLATE application/rdf+xml application/rss+xml application/atom+xml
+    AddOutputFilterByType DEFLATE text/javascript application/javascript application/x-javascript application/json
+    AddOutputFilterByType DEFLATE application/x-httpd-php application/x-httpd-fastphp
+    AddOutputFilterByType DEFLATE application/x-font-ttf application/x-font-otf
+    AddOutputFilterByType DEFLATE font/truetype font/opentype
+  </IfModule>
+</IfModule>
+
+
+# =========================
+# 3) PageSpeed（使っている場合）
+# =========================
+<IfModule pagespeed_module>
+  ModPagespeed on
+  ModPagespeedDisableFilters rewrite_images
+</IfModule>
+
+
+# =========================
+# 4) キャッシュ制御（ここが本題）
+#    “更新を反映させたい”設定
+# =========================
+<IfModule mod_headers.c>
+
+  # ---- HTML は常に再検証（WordPressの表示が古くなるのを防ぐ）
+  <FilesMatch "\.(html?|php)$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+
+  # ---- JSON / manifest も基本は再検証
+  <FilesMatch "\.(json|map|webmanifest|manifest|appcache)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+
+  # ---- JS/CSS は「短め + 再検証」
+  #      ※アプリ内ブラウザ対策として max-age を短くする
+  <FilesMatch "\.(css|js)$">
+    Header set Cache-Control "public, max-age=300, must-revalidate"
+  </FilesMatch>
+
+  # ---- 画像も「短め + 再検証」
+  <FilesMatch "\.(png|jpe?g|gif|webp|svg|ico)$">
+    Header set Cache-Control "public, max-age=300, must-revalidate"
+  </FilesMatch>
+
+  # ---- ★ shader を確実に反映（.frag/.vert/.glsl など）
+  <FilesMatch "\.(frag|vert|glsl|shader)$">
+    Header set Cache-Control "no-cache, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+
+  # ---- wasm / bin 等も更新反映優先なら短め
+  <FilesMatch "\.(wasm|bin|data)$">
+    Header set Cache-Control "public, max-age=300, must-revalidate"
+  </FilesMatch>
+
+</IfModule>
+
+
+# =========================
+# 5) Expires（古い設定を“長期”にしない）
+#    ※mod_headers の Cache-Control を優先させたいので、
+#      Expires は「短め/無効寄り」に寄せる
+# =========================
+<IfModule mod_expires.c>
+  ExpiresActive on
+
+  # 既定：短め（or 0）
+  ExpiresDefault "access plus 0 seconds"
+
+  # HTML
+  ExpiresByType text/html "access plus 0 seconds"
+
+  # CSS/JS
+  ExpiresByType text/css "access plus 5 minutes"
+  ExpiresByType application/javascript "access plus 5 minutes"
+  ExpiresByType text/javascript "access plus 5 minutes"
+
+  # 画像
+  ExpiresByType image/jpeg "access plus 5 minutes"
+  ExpiresByType image/png  "acce
