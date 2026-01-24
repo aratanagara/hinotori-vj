@@ -6,6 +6,11 @@ uniform sampler2D tex0;
 uniform sampler2D tex1;
 uniform sampler2D bgExtra;
 uniform sampler2D bgManga;
+uniform sampler2D bgPhoto;
+uniform vec2 bgPhotoSize;
+uniform vec2 bgCamPx;
+uniform float bgZoom;
+uniform float manualZoomOffset; // 手動ズームオフセット（freeZoomに乗算）
 uniform vec2  resolution;
 uniform vec2  texSize;
 uniform float time;
@@ -13,8 +18,14 @@ uniform float bpm;
 uniform float beat;
 uniform int   bgMode;
 uniform int   paletteMode;
-uniform int   overlayOn;
+uniform int   invertPalette; // INVERT専用フラグ
 
+// glitch関連(重複削除)
+uniform int   glitchMode;
+uniform float glitchAmt;
+uniform float glitchSeed;
+uniform float glitchBeat;
+uniform int   overlayOn;
 
 uniform vec2  centerN;
 uniform float ringDensity;
@@ -75,6 +86,13 @@ const float FREE_ZOOM_RATE  = 0.10; // 低いほどゆっくり
 // =====================================================
 float hash21(vec2 p){
   return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123);
+}
+
+float hash11(float p) {
+  p = fract(p * 0.1031);
+  p *= p + 33.33;
+  p *= p + p;
+  return fract(p);
 }
 
 float easeOutQuint(float x){
@@ -527,7 +545,14 @@ vec3 bg_cos20(vec2 fc){
   vec3 col = vec3(0.0);
 
   for(int c=0;c<3;c++){
-    vec2 uv = (fc * 50.0 - resolution.xy) / resolution.y / 10.0;
+    // 統一されたbgZoomを適用（小さいほどZOOM、大きいほど引き）
+    vec2 uv = (fc * 50.0 - resolution.xy) / resolution.y / 10.0 / bgZoom;
+    
+    // パン（カメラ移動）をUV空間で適用（シンプルかつ大きく）
+    // bgCamPxはピクセル単位、これをUV空間にスケール
+    vec2 panUV = bgCamPx / resolution.y * 5.0; // 5.0倍で効果を大きく
+    uv = uv + panUV; // +符号で直感的な方向
+    
     uv += vec2(tUVx, tUVy) / 10.0;
 
     float t = tBase + float(c) / 10.0;
@@ -613,6 +638,25 @@ vec3 bg_inkelly(vec2 fc){
 }
 
 // selector
+
+// =====================================================
+// bgMode=10 : panel collage (CPU composited in bgPhoto)
+// - no wrap: clamp outside to white
+// - camera: center-based pan(px) + zoom
+// =====================================================
+vec3 bg_photo(vec2 fc){
+  // fc: pixel coords in the main screen (0..resolution)
+  float z = max(0.001, bgZoom);
+
+  // map screen to bgPhoto pixel space
+  vec2 view = (fc - 0.5 * resolution) / z;
+  vec2 p = 0.5 * bgPhotoSize + bgCamPx + view;
+
+  // clamp (no looping)
+  vec2 uv = clamp(p / max(bgPhotoSize, vec2(1.0)), vec2(0.0), vec2(1.0));
+  return texture2D(bgPhoto, uv).rgb;
+}
+
 vec3 getBackground(vec2 fc){
   if(bgMode==1) return bg_noise(fc);
   if(bgMode==2) return bg_7sKSDd(fc);
@@ -623,6 +667,19 @@ vec3 getBackground(vec2 fc){
   if(bgMode==7) return bg_cos20(fc);
   if(bgMode==8) return bg_inkelly(fc);
   if(bgMode==9) return texture2D(bgManga, fc / resolution).rgb;
+  if(bgMode==10){
+    // bgPhoto は 2D合成キャンバス（2x window）
+    // カメラ：スクロール(bgCamPx) + ズーム(bgZoom)、端はラップ
+    vec2 uv = fc / resolution;
+    float z = max(0.001, bgZoom);
+    vec2 cam = bgCamPx / max(bgPhotoSize, vec2(1.0));
+    vec2 suv = (uv - 0.5) / z + 0.5 + cam;
+    // wrap
+    suv = fract(suv);
+    // p5テクスチャの上下反転補正
+    suv.y = 1.0 - suv.y;
+    return texture2D(bgPhoto, suv).rgb;
+  }
 
   return bg_vangogh(fc);
 }
@@ -687,7 +744,293 @@ vec3 applyPaletteAll(vec3 col, vec2 fc){
     return applyTwoColor(col, bg, fg, fc);
   }
 
+  if(paletteMode == 5){
+    return vec3(1.0) - col;
+  }
+
   return applyMangaTone(col, fc);
+}
+
+
+
+// =====================================================
+// glitch UV modification (before texture sampling)
+// =====================================================
+vec2 applyGlitchUV(vec2 uv, vec2 fc){
+  if (glitchMode != 1) return uv;
+  float k = clamp(glitchAmt, 0.0, 1.0);
+  if (k <= 0.00001) return uv;
+
+  float b = glitchBeat;
+  float stepB = floor(b * 16.0);
+  float seed = fract(sin((stepB + 1.0) * 78.233 + glitchSeed * 11.7) * 12345.678);
+  
+  // ビート同期：1拍ごとに強弱をつける
+  float beatPhase = fract(b);
+  // ビートの最初の25%で発生、残り75%は休止
+  float beatActive = step(beatPhase, 0.25);
+  // ビート内での強度カーブ（0→1→0）
+  float beatCurve = sin(min(beatPhase / 0.25, 1.0) * PI);
+  
+  // 全体的な発生確率（常時ではなく間欠的に）
+  float globalTrigger = step(0.3, seed) * beatActive * k;
+  if (globalTrigger < 0.001) return uv;
+  
+  // スライス高さ：極端に指数関数的（2px〜600px）
+  float sliceRandom = hash11(seed * 3.7);
+  // 6乗で極端な偏り：ほとんどが細く、稀に極太
+  float sliceHeightPx = 2.0 + pow(sliceRandom, 6.0) * 598.0;
+  
+  float pixelY = uv.y * resolution.y;
+  float sid = floor(pixelY / sliceHeightPx);
+  float r1 = hash11(sid * 13.37 + seed * 91.7);
+  
+  // スライスごとの発生確率（7乗で極端に選択的）
+  float intensity = pow(r1, 7.0);
+  float shouldGlitch = step(0.8, r1); // 上位20%のみ
+  
+  if (shouldGlitch < 0.5) return uv;
+
+  // シフト量も極端に（5乗）
+  float shiftBase = pow(hash11(sid * 7.31 + seed * 19.1), 5.0);
+  float shiftAmt = (shiftBase - 0.5) * 3.0 * intensity * beatCurve;
+  float shiftAmt2 = (pow(hash11(sid * 29.3 + seed * 3.7), 3.0) - 0.5) * 0.8 * intensity;
+  float beatShift = sin(b * TAU) * 0.3 * intensity * beatCurve;
+  float randomShift = (pow(hash11(sid * 17.3 + seed * 5.3), 4.0) - 0.5) * 1.2 * intensity;
+  
+  // UV X座標をシフト（ループ）
+  float totalShift = globalTrigger * (shiftAmt + shiftAmt2 + beatShift + randomShift);
+  uv.x = fract(uv.x + totalShift);
+  
+  return uv;
+}
+
+// glitchMode=3,4,5用のUV変換（複数モード対応版）
+vec2 applyGlitchUV_Multi(vec2 uv, vec2 fc){
+  float k = clamp(glitchAmt, 0.0, 1.0);
+  if (k <= 0.00001) return uv;
+  
+  float b = glitchBeat;
+  float stepB = floor(b * 16.0);
+  float seed = fract(sin((stepB + 1.0) * 78.233 + glitchSeed * 11.7) * 12345.678);
+  
+  // glitchMode=3: NOISE DISPLACEMENT
+  if (glitchMode == 3) {
+    float nx = hash11(fc.x * 0.1 + fc.y * 0.1 + stepB * 17.0 + seed * 101.7);
+    float ny = hash11(fc.x * 0.1 + fc.y * 0.1 + stepB * 23.0 + seed * 103.3);
+    vec2 displacement = vec2(nx - 0.5, ny - 0.5) * 0.2 * k;
+    return uv + displacement;
+  }
+  
+  // glitchMode=4: FOCUSED TWIST
+  if (glitchMode == 4) {
+    float stepB4 = floor(b * 4.0);
+    float seed4 = fract(sin((stepB4 + 1.0) * 78.233 + glitchSeed * 11.7) * 12345.678);
+    
+    float beatPhase = fract(b);
+    float twistAmount = sin(beatPhase * PI);
+    twistAmount = pow(twistAmount, 0.8) * k;
+    
+    vec2 center = vec2(hash11(seed4 * 3.1), hash11(seed4 * 7.7));
+    vec2 toCenter = uv - center;
+    float dist = length(toCenter);
+    float radius = 0.3 + hash11(seed4 * 11.3) * 0.4;
+    float influence = smoothstep(radius * 1.2, 0.0, dist);
+    
+    if(influence > 0.001){
+      float rotation = (hash11(seed4 * 13.7) - 0.5) * PI * 10.0 * twistAmount;
+      float distFactor = 1.0 - pow(dist / radius, 0.5);
+      rotation *= distFactor;
+      
+      float scaleBase = hash11(seed4 * 19.1);
+      float scale = (scaleBase < 0.5) ? (1.0 - twistAmount * 0.9) : (1.0 + twistAmount * 2.0);
+      
+      float angle = atan(toCenter.y, toCenter.x);
+      float newAngle = angle + rotation;
+      float newDist = dist * scale;
+      
+      vec2 displaced = center + vec2(cos(newAngle) * newDist, sin(newAngle) * newDist);
+      uv = mix(uv, displaced, influence);
+    }
+    return uv;
+  }
+  
+  // glitchMode=5: MOTION BLUR
+  if (glitchMode == 5) {
+    float beatPhase = fract(b);
+    float blurAmount = sin(beatPhase * PI);
+    blurAmount = pow(blurAmount, 1.0) * k;
+    
+    // 2拍ごとに方向が変わる
+    float stepB2 = floor(b * 0.5);
+    float directionSeed = fract(sin(stepB2 * 78.233 + glitchSeed * 11.7) * 12345.678);
+    
+    // 8方向からランダムに選択（上下左右+斜め4方向）
+    // 0:右、1:右下、2:下、3:左下、4:左、5:左上、6:上、7:右上
+    float dirIndex = floor(directionSeed * 8.0);
+    float motionAngle = dirIndex * (TAU / 8.0); // 45度刻み
+    
+    // ピクセルごとに微妙な揺らぎ
+    float pixelNoise = hash11(fc.x * 0.01 + fc.y * 0.01 + seed * 7.3);
+    motionAngle += (pixelNoise - 0.5) * 0.3;
+    
+    vec2 motionDir = vec2(cos(motionAngle), sin(motionAngle));
+    float displacement = blurAmount * 0.15;
+    float depthVariation = hash11(fc.x * 0.05 + fc.y * 0.05 + seed * 13.7);
+    displacement *= (0.5 + depthVariation * 0.5);
+    
+    return uv + motionDir * displacement;
+  }
+  
+  return uv;
+}
+
+// =====================================================
+// glitch (screen-space, affects the whole composite)
+// =====================================================
+float gSat(float x){ return clamp(x, 0.0, 1.0); }
+
+vec3 glitchOp(vec3 c, float k, float m){
+  // m selects operation; k is strength
+  // channel shuffle / invert / crush
+  if (m < 0.33){
+    c = vec3(c.g, c.b, c.r);
+  } else if (m < 0.66){
+    c = 1.0 - c;
+  } else {
+    float q = mix(10.0, 4.0, k);
+    c = floor(c * q + 0.5) / q;
+  }
+  // contrast bump
+  c = mix(c, pow(c, vec3(0.75)), k*0.35);
+  return c;
+}
+
+vec3 applyGlitchAll(vec3 col, vec2 fc){
+  if (glitchMode <= 0) return col;
+  float k = clamp(glitchAmt, 0.0, 1.0);
+  if (k <= 0.00001) return col;
+
+  // beat-synced step (16th by default on JS side)
+  float b = glitchBeat;
+  float stepB = floor(b * 4.0); // internal: 4x; JS already controls seed per subdiv
+  vec2 uv = fc / max(resolution, vec2(1.0));
+
+  // deterministic seed per step (stable inside the step)
+  float seed = fract(sin((stepB + 1.0) * 78.233 + glitchSeed * 11.7) * 12345.678);
+
+  // -----------------------
+  // Mode 1: CUTUP (SLICE) - 背景とhinotoriはすでにUVレベルで処理済み
+  // -----------------------
+  if (glitchMode == 1){
+    return col;
+  }
+
+  // -----------------------
+  // Mode 2: MOSAIC/SLIT（モザイク/スリット）
+  // -----------------------
+  if (glitchMode == 2){
+    // 時間経過で細かい→大きいモザイクへ変化
+    float beatPhase = fract(b);
+    // 0→1で細かい→大きいへ変化
+    float sizeAnim = smoothstep(0.0, 1.0, beatPhase);
+    
+    // モザイクサイズ（細かい4pxから大きい32pxへ）
+    float mosaicSize = mix(4.0, 32.0, sizeAnim * hash11(seed * 7.3));
+    vec2 mosaicCell = floor(fc / mosaicSize);
+    
+    // スリット効果
+    float slitType = hash11(seed * 3.7);
+    // スリット幅も時間で変化
+    float slitFreq = mix(30.0, 8.0, sizeAnim * hash11(seed * 9.1));
+    float slit = 0.0;
+    
+    if(slitType < 0.5){
+      slit = step(0.5, fract(uv.x * slitFreq + seed));
+    } else {
+      slit = step(0.5, fract(uv.y * slitFreq + seed));
+    }
+    
+    // モザイクとスリットの切り替え
+    float effectType = hash11(seed * 11.3);
+    vec3 result = col;
+    
+    if(effectType < 0.5){
+      // モザイク効果
+      float blockHash = hash21(mosaicCell + seed * 7.7);
+      if(blockHash > 0.7){
+        result = vec3(col.g, col.b, col.r);
+      } else if(blockHash > 0.4){
+        result = vec3(col.b, col.r, col.g);
+      }
+    } else {
+      // スリット効果
+      result = mix(col, vec3(1.0) - col, slit * 0.7);
+    }
+    
+    result = mix(col, result, k);
+    
+    // ノイズ追加（サイズに応じて強度変化）
+    float noiseAmt = mix(0.15, 0.05, sizeAnim);
+    float noise = (hash11(fc.x + fc.y * 173.1 + stepB * 5.0) - 0.5) * noiseAmt * k;
+    result += noise;
+    
+    return clamp(result, 0.0, 1.0);
+  }
+
+  // -----------------------
+  // Mode 3: WHITE NOISE (full)
+  // -----------------------
+  if (glitchMode == 3){
+    // white noise (grayscale) - beat locked
+    float n = hash11(fc.x + fc.y * 113.1 + stepB * 17.0 + seed * 101.7);
+    vec3 wn = vec3(n);
+    // allow a tiny mix back to preserve silhouette if desired
+    return clamp(mix(col, wn, 0.92 * k), 0.0, 1.0);
+  }
+
+  // -----------------------
+  // Mode 4: LENS BLUR (強弱のついたレンズぼかし)
+  // -----------------------
+  if (glitchMode == 4){
+    vec2 center = resolution * 0.5;
+    vec2 toCenter = fc - center;
+    float dist = length(toCenter);
+    float maxDist = length(resolution * 0.5);
+    float distNorm = clamp(dist / max(maxDist, 1.0), 0.0, 1.0);
+    
+    // 中心から外側にかけて指数関数的にぼかしを強く
+    float blurStrength = pow(distNorm, 2.5) * k;
+    
+    // ビートに合わせてパルス
+    float beatPulse = 0.5 + 0.5 * sin(b * TAU);
+    blurStrength *= (0.6 + 0.4 * beatPulse);
+    
+    // レンズ歪み効果（簡易版）
+    float distortAmt = blurStrength * 0.08;
+    vec2 dir = (length(toCenter) > 0.1) ? normalize(toCenter) : vec2(0.0);
+    float distortion = distNorm * distNorm * distortAmt;
+    
+    // 色収差（RGB分離）
+    vec3 aberration = col;
+    float chromaAmt = blurStrength * 12.0;
+    
+    // 簡易的な色収差（ピクセルシフト）
+    aberration.r = col.r * (1.0 - blurStrength * 0.1);
+    aberration.g = col.g;
+    aberration.b = col.b * (1.0 + blurStrength * 0.1);
+    
+    // ビネット効果（周辺減光）
+    float vignette = 1.0 - pow(distNorm, 3.0) * blurStrength * 0.6;
+    aberration *= vignette;
+    
+    // 歪みとぼかしをミックス
+    vec3 result = mix(col, aberration, clamp(blurStrength * 2.0, 0.0, 1.0));
+    
+    return clamp(result, 0.0, 1.0);
+  }
+
+  return col;
 }
 
 // =====================================================
@@ -702,8 +1045,65 @@ void main(){
   // 1) 背景は常に生成する
   // =========================
   vec2 bgFC = gl_FragCoord.xy;
+  
+  // カットアップグリッチ用のFC座標変更（背景にも適用）
+  if(glitchMode == 1 && glitchAmt > 0.0){
+    float b = glitchBeat;
+    float stepB = floor(b * 16.0);
+    float seed = fract(sin((stepB + 1.0) * 78.233 + glitchSeed * 11.7) * 12345.678);
+    
+    // ビート同期
+    float beatPhase = fract(b);
+    float beatActive = step(beatPhase, 0.25);
+    float beatCurve = sin(min(beatPhase / 0.25, 1.0) * PI);
+    
+    float k = clamp(glitchAmt, 0.0, 1.0);
+    float globalTrigger = step(0.3, seed) * beatActive * k;
+    
+    if(globalTrigger > 0.001){
+      vec2 screenUV = bgFC / resolution;
+      
+      // 極端なスライス高さ（2px〜600px、6乗）
+      float sliceRandom = hash11(seed * 3.7);
+      float sliceHeightPx = 2.0 + pow(sliceRandom, 6.0) * 598.0;
+      
+      float pixelY = bgFC.y;
+      float sid = floor(pixelY / sliceHeightPx);
+      float r1 = hash11(sid * 13.37 + seed * 91.7);
+      
+      // 極端な選択性（7乗）
+      float intensity = pow(r1, 7.0);
+      float shouldGlitch = step(0.8, r1);
+      
+      if(shouldGlitch > 0.5){
+        // 極端なシフト量（5乗）
+        float shiftBase = pow(hash11(sid * 7.31 + seed * 19.1), 5.0);
+        float shiftAmt = (shiftBase - 0.5) * 3.0 * intensity * beatCurve;
+        float shiftAmt2 = (pow(hash11(sid * 29.3 + seed * 3.7), 3.0) - 0.5) * 0.8 * intensity;
+        float beatShift = sin(b * TAU) * 0.3 * intensity * beatCurve;
+        float randomShift = (pow(hash11(sid * 17.3 + seed * 5.3), 4.0) - 0.5) * 1.2 * intensity;
+        
+        float totalShift = globalTrigger * (shiftAmt + shiftAmt2 + beatShift + randomShift);
+        
+        // bgFCのX座標をシフト
+        bgFC.x = mod(bgFC.x + totalShift * resolution.x, resolution.x);
+      }
+    }
+  }
+  
+  // glitchMode=3,4,5用のFC座標変更（背景にも適用）
+  if((glitchMode == 3 || glitchMode == 4 || glitchMode == 5) && glitchAmt > 0.0){
+    vec2 screenUV = bgFC / resolution;
+    vec2 transformedUV = applyGlitchUV_Multi(screenUV, bgFC);
+    bgFC = transformedUV * resolution;
+  }
+  
   if(isFree() && bgMode!=8){
     float z = freeZoom(bt, 55.3);
+    // 手動ズームオフセットを乗算（↑↓キー押しっぱなしで操作可能）
+    // オフセット範囲: 0.5～4.0
+    float offset = clamp(manualZoomOffset, 0.5, 4.0);
+    z *= offset;
     bgFC = applyZoomToFC(bgFC, z);
   }
 
@@ -714,10 +1114,18 @@ void main(){
   bg = mix(bg, palPick(fract(cb * 0.05)), 0.06);
 
   // =========================
-  // 2) overlay 無効 → 背景のみ
+  // 2) overlay 無効 → 背景のみ（グリッチ適用）
   // =========================
   if(overlayOn == 0){
-    gl_FragColor = vec4(applyPaletteAll(bg, gl_FragCoord.xy), 1.0);
+    vec3 finalBg = applyPaletteAll(bg, gl_FragCoord.xy);
+    finalBg = applyGlitchAll(finalBg, gl_FragCoord.xy);
+    
+    // INVERT（独立して重ねがけ可能）
+    if(invertPalette != 0){
+      finalBg = vec3(1.0) - finalBg;
+    }
+    
+    gl_FragColor = vec4(finalBg, 1.0);
     return;
   }
 
@@ -726,9 +1134,22 @@ void main(){
   // =========================
   vec2 uv = uvCover(vTexCoord, resolution, texSize);
   if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0){
-    gl_FragColor = vec4(applyPaletteAll(bg, gl_FragCoord.xy), 1.0);
+    vec3 finalBg = applyPaletteAll(bg, gl_FragCoord.xy);
+    finalBg = applyGlitchAll(finalBg, gl_FragCoord.xy);
+    
+    // INVERT（独立して重ねがけ可能）
+    if(invertPalette != 0){
+      finalBg = vec3(1.0) - finalBg;
+    }
+    gl_FragColor = vec4(finalBg, 1.0);
     return;
   }
+
+  // カットアップグリッチ用のUV変更を適用
+  uv = applyGlitchUV(uv, gl_FragCoord.xy);
+  
+  // その他のglitchMode用のUV変更を適用
+  uv = applyGlitchUV_Multi(uv, gl_FragCoord.xy);
 
   vec3 src = texture2D(tex0, uv).rgb;
 
@@ -810,5 +1231,13 @@ void main(){
     ? mix(baseCol, ringCol, aLine)
     : mix(baseCol, 1.0 - (1.0 - baseCol) * (1.0 - ringCol), aLine);
 
-  gl_FragColor = vec4(applyPaletteAll(outCol, gl_FragCoord.xy), 1.0);
+  vec3 finalCol = applyPaletteAll(outCol, gl_FragCoord.xy);
+  finalCol = applyGlitchAll(finalCol, gl_FragCoord.xy);
+  
+  // INVERT（独立して重ねがけ可能）
+  if(invertPalette != 0){
+    finalCol = vec3(1.0) - finalCol;
+  }
+  
+  gl_FragColor = vec4(finalCol, 1.0);
 }

@@ -8,7 +8,10 @@ let hinotori, inkelly;
 
 // loaded (main renderer) shaders
 let shDisplayLoaded;   // hinotori.vert + hinotori.frag
-let shStateLoaded;     // hinotori.vert + bg_inkelly_state.frag
+let shStateLoaded;     // hinotori.vert + bg_inkelly.frag
+// Shader source strings (loaded as text for cross-context use)
+let vertSrcArr, fragDisplaySrcArr, fragStateSrcArr, fragMangaSrcArr;
+
 let shMangaLoaded;     // hinotori.vert + bg_manga.frag
 
 // runtime shaders (per-renderer)
@@ -25,11 +28,88 @@ let fbW = 0, fbH = 0;
 // bgMode=9 manga buffer
 let pgManga;
 
+// ---------------------------
+// bgMode=10 : photo background (random from a selected folder, NO manifest)
+// ---------------------------
+let photoImgs = [];
+let photoImgIndex = 0;
+let photoBgCycleBeats = 8.0;
+let lastPhotoBeatStep  = -1;
+let lastPhotoDroneStep = -1;
+ // 何拍ごとに切り替えるか
+let lastPhotoBgStep = -1;
+
+let bgPhotoTex = null; // p5.Image or p5.Graphics (texture)
+
+// photo compositing buffer (2D)
+let pgPhoto;
+
+// photo layers / camera
+let photoLayers = 1;
+let photoLayerAlpha = 1.0; // 2枚目以降の不透明度（通常合成）
+let photoLayerIdx = [];     // indices into photoImgs
+let photoCam = { panX: 0, panY: 0, zoom: 1.0 }; // 統一ズーム（全bgMode共通）
+let manualZoomOffset = 1.0; // 手動ズームオフセット（累積）
+let manualPanX = 0.0;       // 手動パン（累積）
+let manualPanY = 0.0;
+let panMoveAngle = 0.0;     // 移動方向（キーを押した瞬間に決定）
+let panMoveSpeed = 0.0;     // 移動速度
+let photoSeed = 1.234;
+
+let beatSpawnMin = 1;
+let beatSpawnMax = 4;
+let beatSpawnJitterPx = 400; // DRAW配置の中心からの散り半径(px). 小さめにすると“中心から離れすぎない”
+let beatSpawnSubdiv = 4;     // 1拍を何分割して発火するか（2 or 4 推奨）
+
+// bgMode=10 space placements
+let photoPlacements = [];
+let photoPlacementsInit = false;
+// camera velocity (px/sec)
+let photoCamVel = { x: 48.0, y: 24.0 };
+
+// ---------------------------
+// bgMode=10 burst (ENTER hold)
+// ---------------------------
+let burstHeld10 = false;
+let burstImg10 = null;
+let burstBaseX10 = 0;
+let burstBaseY10 = 0;
+let burstDirX10 = 1;
+let burstDirY10 = 0;
+let burstStepPx10 = 300;          // 1ステップ移動距離
+let burstSubDiv10 = 16;           // 1拍を何分割で撃つか（4=16分）
+let burstShotsPerTick10 = 1;     // 1刻みで何枚バババするか
+let burstJitterPx10 = 0;        // ばらけ幅
+let burstScale10 = 1.0;          // 基準スケール
+let burstScaleMul10 = 1.0;      // 後半ほど小さく
+let lastBurstStep10 = -1;
+let photoBlank10 = false;        // SPACEで白紙化→次のスポーンまで保持
+
 // params
 let BPM = 120;
-let BEAT_DIV = 4; // 初期：4拍
-let bgMode = 0;   // 0..9
-let paletteMode = 0; // 0 normal, 1 r, 2 g, 3 b, 4 k(tone)
+let BEAT_DIV = 4;
+
+// Motion mode (global for all bgMode)
+const MOTION_DRONE = 0;
+const MOTION_BEAT  = 1;
+let motionMode = MOTION_DRONE; // default: DRONE
+let freezeOthers = false; // S: hinotori以外を一時停止（背景・更新を凍結）
+let freezeTimeT = 0.0;
+let freezeBeatLocal = 0.0;
+let freezeBeatUniform = -1.0;
+let freezeWasOn = false; // freeze開始時のスナップショット保持
+ // 初期：4拍
+let bgMode = 0;   // 0..10
+let paletteMode = 0;
+let invertPalette = 0; // INVERT(mode 5)を独立して管理: 0=OFF, 1=ON
+// glitch (global post)
+let glitchMode = 0;
+let glitchBlockSize = 20.0;   // Glitch2 block size (like Unity _BlockSize)
+let glitchAmount    = 0.10;   // Glitch2 amount (like Unity _GlitchAmount)
+let glitchFreqBeats = 2.0;    // Glitch2 frequency in beats (like Unity _GlitchFrequency)
+let glitchDurBeats  = 0.5;    // Glitch2 duration in beats (like Unity _GlitchDuration)
+let glitchAmt  = 0.85;
+// 0 normal, 1 r, 2 g, 3 b, 4 k(tone)
 
 let center = { x: 0.5, y: 0.5 };
 let showHinotori = true;
@@ -108,21 +188,53 @@ let mangaPageInsetXPx = 36.0;  // ページの左右余白（内枠用）
 let mangaPageInsetYPx = 36.0;  // ページの上下余白（内枠用）
 let mangaSpinePx      = 12.0;  // 見開きのノド（中央の余白）
 
+// ---------------------------
+// bgMode=10 : photo background (selected folder, NO manifest)
+// - 「LOAD MANGA FOLDER」でフォルダ選択
+// - サブフォルダも再帰探索
+// - bgMode=10で複数枚を通常合成で重ね、FREE時はパン/ズーム
+// ---------------------------
+// ※ブラウザはディレクトリ一覧を直接取得できないため、manifest が必要です。
+
+// 手動フォールバック（manifestが無い時）
+let mangaFallbackList = [
+  // "001.jpg",
+  // "002.png",
+];
+let photoResetProb = 0.16; // 4%/step（BEATなら毎拍、DRONEなら10秒ごと）
+let panel10Count = 10;
+let photoImgsActive = []; // 毎回使う12枚
+
+
 // UI
 let uiRoot;
 let bgSlider, bpmSlider, beatSlider;
 let palButtons = {};
 let uiVisible = true;
 let uiHideTimer = null;
+let uiForceHidden = false;
 
 let bgValueSpan, bpmValueSpan, beatValueSpan;
 let hinoBtn;
+let photoStatusSpan;
+
+// Motion UI (global refs so key shortcuts can update button state)
+let motionValueSpan;
+let btnDrone;
+let btnDraw;
+function syncMotionUI(){
+  if (!motionValueSpan || !btnDrone || !btnDraw) return;
+  const isDrone = (motionMode === MOTION_DRONE);
+  motionValueSpan.html(isDrone ? "DRONE" : "BEAT");
+  btnDrone.style("opacity", isDrone ? "1.0" : "0.4");
+  btnDraw.style("opacity",  isDrone ? "0.4" : "1.0");
+}
 
 const LABEL_W = 44;
 const VALUE_W = 42;
 const GAP_W   = 8;
 
-const BEAT_OPTIONS = [0, 1, 2, 4, 8];
+const BEAT_OPTIONS = [1, 2, 4, 8];
 
 // helpers
 function fract(x){ return x - Math.floor(x); }
@@ -350,10 +462,128 @@ function preload(){
   hinotori = loadImage("hinotori.png");
   inkelly  = loadImage("inkelly.png");
 
-  shDisplayLoaded = loadShader("hinotori.vert", "hinotori.frag");
-  shStateLoaded   = loadShader("hinotori.vert", "bg_inkelly_state.frag");
-  shMangaLoaded   = loadShader("hinotori.vert", "bg_manga.frag");
+  // Load shader sources as text arrays
+  vertSrcArr = loadStrings("hinotori.vert");
+  fragDisplaySrcArr = loadStrings("hinotori.frag");
+  fragStateSrcArr = loadStrings("bg_inkelly.frag");
+  fragMangaSrcArr = loadStrings("bg_manga.frag");
 }
+
+// ---------------------------
+// bgMode=10 helpers
+// 画像がキャンバス外にはみ出す時に、反対側へ“つながる”ように二重(四重)描画する
+// (x,y) は左上、(w,h) は描画サイズ
+function drawImageWrap(pg, img, x, y, w, h){
+  if (!pg || !img) return;
+  const W = pg.width, H = pg.height;
+
+  // normalize start position so even if x/y are outside, wrapping still works
+  x = ((x % W) + W) % W;
+  y = ((y % H) + H) % H;
+
+  // まず本体
+  pg.image(img, Math.floor(x), Math.floor(y), Math.floor(w), Math.floor(h));
+
+  // はみ出し判定（少し余裕を持つ）
+  const overL = (x < 0);
+  const overR = (x + w > W);
+  const overT = (y < 0);
+  const overB = (y + h > H);
+
+  // 横方向
+  if (overL) pg.image(img, Math.floor(x + W), Math.floor(y), Math.floor(w), Math.floor(h));
+  if (overR) pg.image(img, Math.floor(x - W), Math.floor(y), Math.floor(w), Math.floor(h));
+
+  // 縦方向
+  if (overT) pg.image(img, Math.floor(x), Math.floor(y + H), Math.floor(w), Math.floor(h));
+  if (overB) pg.image(img, Math.floor(x), Math.floor(y - H), Math.floor(w), Math.floor(h));
+
+  // 斜め（角）
+  if (overL && overT) pg.image(img, Math.floor(x + W), Math.floor(y + H), Math.floor(w), Math.floor(h));
+  if (overL && overB) pg.image(img, Math.floor(x + W), Math.floor(y - H), Math.floor(w), Math.floor(h));
+  if (overR && overT) pg.image(img, Math.floor(x - W), Math.floor(y + H), Math.floor(w), Math.floor(h));
+  if (overR && overB) pg.image(img, Math.floor(x - W), Math.floor(y - H), Math.floor(w), Math.floor(h));
+}
+
+function _pickBurstDir8(){
+  const dirs = [
+    [ 1, 0], [-1, 0], [0, 1], [0,-1],
+    [ 1, 1], [ 1,-1], [-1, 1], [-1,-1],
+  ];
+  const d = dirs[Math.floor(Math.random()*dirs.length)];
+  return {x:d[0], y:d[1]};
+}
+
+function startBurst10(){
+  if (!pgPhoto || !photoImgs || photoImgs.length === 0) return;
+  burstHeld10 = true;
+  photoBlank10 = false;
+
+  burstImg10 = photoImgs[Math.floor(Math.random()*photoImgs.length)];
+  // ランダム開始位置
+  burstBaseX10 = Math.random() * pgPhoto.width;
+  burstBaseY10 = Math.random() * pgPhoto.height;
+
+  const d = _pickBurstDir8();
+  burstDirX10 = d.x;
+  burstDirY10 = d.y;
+
+  // 最初は必ずランダム距離（固定でもOK）
+  burstStepPx10 = 36 + Math.floor(Math.random()*40);
+
+  lastBurstStep10 = -1;
+}
+
+function stopBurst10(){
+  burstHeld10 = false;
+}
+
+function tickBurst10(beatLocal){
+  if (!burstHeld10 || bgMode !== 10) return;
+  if (!pgPhoto || !burstImg10) return;
+
+  // BPM同期：1拍を burstSubDiv10 分割
+  const step = Math.floor(beatLocal * Math.max(1, burstSubDiv10));
+  if (step === lastBurstStep10) return;
+  lastBurstStep10 = step;
+
+  // ベース移動（端でループ）
+  burstBaseX10 = ((burstBaseX10 + burstDirX10 * burstStepPx10) % pgPhoto.width + pgPhoto.width) % pgPhoto.width;
+  burstBaseY10 = ((burstBaseY10 + burstDirY10 * burstStepPx10) % pgPhoto.height + pgPhoto.height) % pgPhoto.height;
+
+  // “バババ”：同じ画像を微妙にズラして重ねる（後半ほど小さく）
+  let scale = burstScale10;
+  for (let i=0; i<burstShotsPerTick10; i++){
+    const ox = (Math.random()*2-1) * burstJitterPx10;
+    const oy = (Math.random()*2-1) * burstJitterPx10;
+
+    const w = burstImg10.width * scale;
+    const h = burstImg10.height * scale;
+    const x = burstBaseX10 + ox - w*0.5;
+    const y = burstBaseY10 + oy - h*0.5;
+
+    drawImageWrap(pgPhoto, burstImg10, x, y, w, h);
+    scale *= burstScaleMul10;
+  }
+}
+
+function resetPhotoCanvas10(){
+  if (!pgPhoto) return;
+  pgPhoto.push();
+  pgPhoto.resetMatrix();
+  pgPhoto.clear();
+  pgPhoto.background(255);
+  pgPhoto.pop();
+  photoPlacementsInit = false;
+  photoBlank10 = true;
+  if (typeof _beatShotQueue !== 'undefined') _beatShotQueue = [];
+}
+
+// ---------------------------
+
+
+
+
 
 // ★renderer安全: 任意renderer上にシェーダを“再生成”する
 function makeShaderOn(pgOrMainRenderer, loadedShader){
@@ -371,12 +601,20 @@ function setup() {
 
   cnv.elt.tabIndex = 1;
   cnv.elt.focus();
+  window.addEventListener('blur', () => stopBurst10());
 
-  shDisplay = makeShaderOn(null, shDisplayLoaded);
+  // Create shader from loaded source
+  if (!vertSrcArr || !fragDisplaySrcArr) {
+    console.error("Shader sources not loaded!");
+  } else {
+    shDisplay = createShader(vertSrcArr.join("\n"), fragDisplaySrcArr.join("\n"));
+    console.log("✓ Created shDisplay:", shDisplay ? "SUCCESS" : "FAILED");
+  }
 
   initBuffers();
 
   rebuildMangaLayout(0.0);
+
 
   // ==============================
   // UI
@@ -402,7 +640,7 @@ function setup() {
   bgValueSpan = createSpan(String(bgMode + 1)).parent(bgRow);
   bgValueSpan.style(`width:${VALUE_W}px; text-align:right; color:#fff; font-size:12px; opacity:0.9;`);
 
-  bgSlider = createSlider(1, 10, bgMode + 1, 1).parent(bgRow);
+  bgSlider = createSlider(1, 11, bgMode + 1, 1).parent(bgRow);
   bgSlider.style(`width:${sliderWidth()}px;`);
   bgSlider.input(() => {
     bgMode = bgSlider.value() - 1;
@@ -434,13 +672,39 @@ function setup() {
   beatValueSpan = createSpan(String(BEAT_DIV)).parent(beatRow);
   beatValueSpan.style(`width:${VALUE_W}px; text-align:right; color:#fff; font-size:12px; opacity:0.9;`);
 
-  beatSlider = createSlider(0, BEAT_OPTIONS.length - 1, 3, 1).parent(beatRow);
+  beatSlider = createSlider(0, BEAT_OPTIONS.length - 1, 2, 1).parent(beatRow);
   beatSlider.style(`width:${sliderWidth()}px;`);
   beatSlider.input(() => {
     BEAT_DIV = BEAT_OPTIONS[beatSlider.value()];
     syncUI_All();
     showUI();
   });
+
+  // -------------------------------------------------
+  // MOTION MODE (DRONE / BEAT)
+  // -------------------------------------------------
+  const rowMotion = createDiv().parent(uiRoot);
+  rowMotion.style("display:flex; align-items:center; gap:8px; margin:4px 0;");
+
+  btnDrone = createButton("DRONE").parent(rowMotion);
+  btnDraw  = createButton("BEAT").parent(rowMotion);
+
+  btnDrone.style("flex:1; height:30px; font-size:14px;");
+  btnDraw.style("flex:1; height:30px; font-size:14px;");
+
+  btnDrone.mousePressed(() => {
+    motionMode = MOTION_DRONE;
+    syncMotionUI();
+    showUI();
+  });
+
+  btnDraw.mousePressed(() => {
+    motionMode = MOTION_BEAT;
+    reseedPhoto();
+    syncMotionUI();
+    showUI();
+  });
+
 
   const hinoRow = createDiv().parent(uiRoot);
   hinoRow.style(`margin-top:6px; display:flex;`);
@@ -460,26 +724,108 @@ function setup() {
     { key: "C", mode: 0 },
     { key: "R", mode: 1 },
     { key: "G", mode: 2 },
-    { key: "B", mode: 3 },
+    { key: "Y", mode: 3 },
     { key: "K", mode: 4 },
+    { key: "I", mode: 5 },
   ];
 
   pals.forEach(p => {
     const b = createButton(p.key).parent(palWrap);
     b.style(`flex:1; height:32px; font-size:14px; background:#222; color:#fff; border:1px solid #555; border-radius:4px;`);
     b.mousePressed(() => {
-      paletteMode = p.mode;
+      if (p.mode === 0) {
+        // Cボタン: 全クリア
+        paletteMode = 0;
+      } else if (p.mode === 5) {
+        // Iボタン: INVERT専用トグル
+        invertPalette = invertPalette ? 0 : 1;
+      } else {
+        // R/G/Y/Kボタン: 排他的選択（従来通り）
+        paletteMode = (paletteMode === p.mode) ? 0 : p.mode;
+      }
       syncUI_All();
       showUI();
     });
     palButtons[p.mode] = b;
   });
 
-  const c = document.querySelector("canvas");
-  c.addEventListener("pointerdown", () => toggleUI());
+  
+  // -------------------------------------------------
+  // GLITCH MODE (OFF / CUTUP / MOSAIC / NOISE)  ※paletteModeとは独立
+  // -------------------------------------------------
+  const rowGlitch = createDiv().parent(uiRoot);
+  rowGlitch.style("display:flex; align-items:center; gap:8px; margin:4px 0;");
 
+  const btnG0 = createButton("V").parent(rowGlitch);
+  const btnG1 = createButton("X").parent(rowGlitch);
+  const btnG2 = createButton("Z").parent(rowGlitch);
+  const btnG3 = createButton("W").parent(rowGlitch);
+  const btnG4 = createButton("T").parent(rowGlitch);
+  const btnG5 = createButton("B").parent(rowGlitch);
+
+  [btnG0, btnG1, btnG2, btnG3, btnG4, btnG5].forEach(b => b.style("flex:1; height:30px; font-size:14px;"));
+
+  function syncGlitchUI(){
+    btnG0.style("opacity", glitchMode===0 ? "1.0" : "0.4");
+    btnG1.style("opacity", glitchMode===1 ? "1.0" : "0.4");
+    btnG2.style("opacity", glitchMode===2 ? "1.0" : "0.4");
+    btnG3.style("opacity", glitchMode===3 ? "1.0" : "0.4");
+    btnG4.style("opacity", glitchMode===4 ? "1.0" : "0.4");
+    btnG5.style("opacity", glitchMode===5 ? "1.0" : "0.4");
+  }
+
+  // allow other handlers to refresh button states
+  window.__syncGlitchUI = syncGlitchUI;
+
+  btnG0.mousePressed(() => { glitchMode = 0; syncGlitchUI(); syncUI_All(); showUI(); });
+  btnG1.mousePressed(() => { 
+    glitchMode = (glitchMode === 1) ? 0 : 1;
+    syncGlitchUI(); syncUI_All(); showUI(); 
+  });
+  btnG2.mousePressed(() => { 
+    glitchMode = (glitchMode === 2) ? 0 : 2;
+    syncGlitchUI(); syncUI_All(); showUI(); 
+  });
+  btnG3.mousePressed(() => { 
+    glitchMode = (glitchMode === 3) ? 0 : 3;
+    syncGlitchUI(); syncUI_All(); showUI(); 
+  });
+  btnG4.mousePressed(() => { 
+    glitchMode = (glitchMode === 4) ? 0 : 4;
+    syncGlitchUI(); syncUI_All(); showUI(); 
+  });
+  btnG5.mousePressed(() => { 
+    glitchMode = (glitchMode === 5) ? 0 : 5;
+    syncGlitchUI(); syncUI_All(); showUI(); 
+  });
+
+  syncGlitchUI();
   syncUI_All();
 }
+
+function redrawDrone10(){
+  if (!pgPhoto) return;
+
+  // キャンバス白紙化
+  pgPhoto.push();
+  pgPhoto.resetMatrix();
+  pgPhoto.clear();
+  pgPhoto.background(255);
+  pgPhoto.pop();
+
+  // DRONE用の状態をリセット
+  photoPlacementsInit = false;
+  photoPlacements = [];
+
+  // カメラを初期化（少しランダムにしても気持ちいい）
+  photoCam.panX = 0;
+  photoCam.panY = 0;
+  photoCam.zoom = 1.0; // デフォルトズーム
+
+  // DRONEの再シード
+  reseedPhoto();
+}
+
 
 function initBuffers(){
   const scale = 1.0;
@@ -491,8 +837,10 @@ function initBuffers(){
   pgA.noStroke(); pgB.noStroke();
   pgA.pixelDensity(1); pgB.pixelDensity(1);
 
-  shInkellyA = makeShaderOn(pgA, shStateLoaded);
-  shInkellyB = makeShaderOn(pgB, shStateLoaded);
+  shInkellyA = pgA.createShader(vertSrcArr.join("\n"), fragStateSrcArr.join("\n"));
+  console.log("✓ Created shInkellyA:", shInkellyA ? "SUCCESS" : "FAILED");
+  shInkellyB = pgB.createShader(vertSrcArr.join("\n"), fragStateSrcArr.join("\n"));
+  console.log("✓ Created shInkellyB:", shInkellyB ? "SUCCESS" : "FAILED");
 
   pgA.background(0);
   pgB.background(0);
@@ -503,7 +851,16 @@ function initBuffers(){
   pgManga.pixelDensity(1);
   pgManga.background(255);
 
-  shManga = makeShaderOn(pgManga, shMangaLoaded);
+  shManga = pgManga.createShader(vertSrcArr.join("\n"), fragMangaSrcArr.join("\n"));
+  console.log("✓ Created shManga:", shManga ? "SUCCESS" : "FAILED");
+
+  // bgMode=10 photo composite buffer (2D)
+  // ループ（巻き戻し）はしない前提なので、カメラが大きく動ける“広いキャンバス”を用意
+  const PHOTO_SPACE_SCALE = 4.0; // 2x -> 6x（必要ならここだけ上げる）
+  pgPhoto = createGraphics(Math.floor(windowWidth*PHOTO_SPACE_SCALE), Math.floor(windowHeight*PHOTO_SPACE_SCALE));
+  pgPhoto.pixelDensity(1);
+  pgPhoto.background(255);
+
 }
 
 function computeBeatLocal(tSec){
@@ -512,10 +869,61 @@ function computeBeatLocal(tSec){
 }
 
 function draw() {
-  const t = millis() * 0.001;
-  const beatLocal = computeBeatLocal(t);
+  const tNow = millis() * 0.001;
 
-  // A) ping-pong update (inkelly state)
+  // freeze中は「その瞬間の時刻/ビート」を固定して、全bgModeのアニメを止める
+  let t = tNow;
+  let beatLocal = computeBeatLocal(tNow);
+  let beatUniform = (motionMode === MOTION_DRONE) ? -1.0 : beatLocal;
+
+  if (freezeOthers){
+    if (!freezeWasOn){
+      freezeWasOn = true;
+      freezeTimeT = tNow;
+      freezeBeatLocal = beatLocal;
+      freezeBeatUniform = beatUniform;
+    }
+    t = freezeTimeT;
+    beatLocal = freezeBeatLocal;
+    beatUniform = freezeBeatUniform;
+  } else {
+    freezeWasOn = false;
+  }
+
+
+  // beat
+  if (freezeOthers) {
+    // freeze中は入力取りこぼし対策でburstも停止
+    if (burstHeld10) { stopBurst10(); burstHeld10 = false; }
+  }
+
+  // ---------------------------
+  // bgMode=10 burst (ENTER hold)
+  // - burst中は他の動きを止める（updateAndRenderPhotoBG側が早期return）
+  // ---------------------------
+  if (!freezeOthers && bgMode === 10 && burstHeld10){
+    if (!burstImg10) startBurst10();
+    tickBurst10(beatLocal);
+
+    // 保険：keyReleased が取りこぼした時でも止める
+    if (!(keyIsDown(ENTER) || keyIsDown(RETURN))) {
+      stopBurst10();
+    }
+  }
+
+  // ---------------------------
+  // bgMode=7 : 自動ズーム＋パンはfreeZoom()で処理されるため削除
+  // ---------------------------
+
+  // ---------------------------
+  // bgMode=10 : photo background update + composite into pgPhoto
+  // ---------------------------
+  if (!freezeOthers && bgMode === 10){
+    updateAndRenderPhotoBG(t, beatLocal, beatUniform);
+  }
+
+// A) ping-pong update (inkelly state)
+  if (!freezeOthers) {
   {
     const src = ping ? pgA : pgB;
     const dst = ping ? pgB : pgA;
@@ -526,7 +934,7 @@ function draw() {
     shU.setUniform("uPrev", src);
     shU.setUniform("uResolution", [fbW, fbH]);
     shU.setUniform("uTime", t);
-    shU.setUniform("uBeat", (BEAT_DIV === 0) ? -1.0 : beatLocal);
+    shU.setUniform("uBeat", beatUniform);
     shU.setUniform("uDT", (deltaTime || 16.666) * 0.001);
 
     shU.setUniform("uBPM", BPM);
@@ -538,9 +946,11 @@ function draw() {
     dst.rect(-fbW/2, -fbH/2, fbW, fbH);
     ping ^= 1;
   }
+  }
   const stateTex = (ping === 0) ? pgA : pgB;
 
   // B) bgMode=9 manga render -> pgManga
+  if (!freezeOthers) {
   {
     const cyc = Math.max(0.001, mangaCycleBeats);
     const cycIndex = Math.floor(beatLocal / cyc);
@@ -548,6 +958,7 @@ function draw() {
       lastMangaCycle = cycIndex;
       rebuildMangaLayout(beatLocal);
     }
+  }
 
     pgManga.shader(shManga);
 
@@ -586,6 +997,8 @@ function draw() {
     pgManga.rect(-fbW/2, -fbH/2, fbW, fbH);
   }
 
+
+
   // C) main render (display)
   shader(shDisplay);
 
@@ -610,9 +1023,6 @@ function draw() {
   const gg = g * (1 - inkTint) + inkCol[1] * inkTint;
   const b = g * (1 - inkTint) + inkCol[2] * inkTint;
 
-  let beatUniform = beatLocal;
-  if (BEAT_DIV === 0) beatUniform = -1.0;
-
   shDisplay.setUniform("tex0", hinotori);
   shDisplay.setUniform("tex1", inkelly);
   shDisplay.setUniform("overlayOn", showHinotori ? 1 : 0);
@@ -620,6 +1030,40 @@ function draw() {
   shDisplay.setUniform("bgExtra", stateTex);
   shDisplay.setUniform("bgManga", pgManga);
 
+  shDisplay.setUniform("bgPhoto", pgPhoto);
+  shDisplay.setUniform("bgPhotoSize", [pgPhoto.width, pgPhoto.height]);
+  
+  // パン：←→キーを押している間、加速しながら移動（MAX 9999 px/s）
+  const dt = deltaTime * 0.001; // 秒単位
+  const acceleration = 3000;     // 加速度 (px/s²)
+  const maxSpeed = 9999;         // 最大速度 (px/s)
+  
+  if (keyIsDown(LEFT_ARROW) || keyIsDown(RIGHT_ARROW)) {
+    // キーを押している間、加速
+    panMoveSpeed += acceleration * dt;
+    panMoveSpeed = Math.min(panMoveSpeed, maxSpeed); // 上限
+    
+    // 設定された方向・速度で移動
+    manualPanX += Math.cos(panMoveAngle) * panMoveSpeed * dt;
+    manualPanY += Math.sin(panMoveAngle) * panMoveSpeed * dt;
+  } else {
+    // キーを離したら速度リセット（次に押したときは初速から）
+    panMoveSpeed = 0.0;
+  }
+  
+  shDisplay.setUniform("bgCamPx", [photoCam.panX + manualPanX, photoCam.panY + manualPanY]);
+  shDisplay.setUniform("bgZoom", photoCam.zoom);
+  
+  // 手動ズームオフセット: ↑↓キー押しっぱなしで毎フレーム累積
+  const zoomSpeed = 0.02; // 1フレームあたりの変化量
+  if (keyIsDown(UP_ARROW)) {
+    manualZoomOffset += zoomSpeed; // ズームイン
+  } else if (keyIsDown(DOWN_ARROW)) {
+    manualZoomOffset -= zoomSpeed; // ズームアウト
+  }
+  manualZoomOffset = constrain(manualZoomOffset, 0.5, 4.0);
+  shDisplay.setUniform("manualZoomOffset", manualZoomOffset);
+  
   shDisplay.setUniform("resolution", [width, height]);
   shDisplay.setUniform("texSize", [hinotori.width, hinotori.height]);
   shDisplay.setUniform("time", t);
@@ -628,6 +1072,16 @@ function draw() {
 
   shDisplay.setUniform("bgMode", bgMode);
   shDisplay.setUniform("paletteMode", paletteMode);
+  shDisplay.setUniform("invertPalette", invertPalette);
+
+  // glitch (whole output)
+  shDisplay.setUniform("glitchMode", glitchMode);
+  shDisplay.setUniform("glitchBlockSize", glitchBlockSize);
+  shDisplay.setUniform("glitchAmount", glitchAmount);
+  shDisplay.setUniform("glitchFreqBeats", glitchFreqBeats);
+  shDisplay.setUniform("glitchDurBeats", glitchDurBeats);
+  shDisplay.setUniform("glitchAmt", glitchAmt);
+  shDisplay.setUniform("glitchBeat", beatLocal);
 
   shDisplay.setUniform("centerN", [center.x, center.y]);
 
@@ -641,7 +1095,7 @@ function draw() {
 
   shDisplay.setUniform("baseInkGain", baseInkGain);
   shDisplay.setUniform("baseInkGamma", baseInkGamma);
-  shDisplay.setUniform("baseInkColor", [r, gg, b]);
+  shDisplay.setUniform("baseInkColor", [g, g, g]);
   shDisplay.setUniform("inkOpacity", inkOpacity);
 
   shDisplay.setUniform("colorLineOpacity", colorLineOpacity);
@@ -661,35 +1115,239 @@ function draw() {
 }
 
 function keyPressed() {
+  // Beat division cycle with <> keys: 1→2→4→8→1...
+  if (key === ',' || key === '<') {
+    const currentIndex = BEAT_OPTIONS.indexOf(BEAT_DIV);
+    const nextIndex = (currentIndex - 1 + BEAT_OPTIONS.length) % BEAT_OPTIONS.length;
+    BEAT_DIV = BEAT_OPTIONS[nextIndex];
+    syncUI_All();
+    showUI();
+    return;
+  }
+  if (key === '.' || key === '>') {
+    const currentIndex = BEAT_OPTIONS.indexOf(BEAT_DIV);
+    const nextIndex = (currentIndex + 1) % BEAT_OPTIONS.length;
+    BEAT_DIV = BEAT_OPTIONS[nextIndex];
+    syncUI_All();
+    showUI();
+    return;
+  }
+
+  // BG shortcut keys
   if (key >= '1' && key <= '9') {
     const v = parseInt(key, 10);
     bgMode = v - 1;
-    syncUI_All();
-    showUI();
   }
   if (key === '0') {
     bgMode = 9;
-    syncUI_All();
-    showUI();
+  }
+  if (key === '-' || key === '_') {
+    bgMode = 10;
   }
 
-  if (keyCode === RIGHT_ARROW) { bgMode = (bgMode + 1) % 10; syncUI_All(); showUI(); }
-  if (keyCode === LEFT_ARROW)  { bgMode = (bgMode + 9) % 10; syncUI_All(); showUI(); }
+  // arrows: ←→でランダム方向を設定（速度は0から加速開始）
+  if (keyCode === LEFT_ARROW || keyCode === RIGHT_ARROW) {
+    // ランダムな角度（速度は0から加速）
+    panMoveAngle = Math.random() * Math.PI * 2;
+    panMoveSpeed = 0.0; // 初速0
+    
+    console.log(`Pan direction set: ${(panMoveAngle * 180 / Math.PI).toFixed(0)}° (accelerating...)`);
+    if (typeof showUI === "function") showUI();
+  }
 
-  if (key === 'c' || key === 'C') paletteMode = 0;
-  if (key === 'r' || key === 'R') paletteMode = 1;
-  if (key === 'g' || key === 'G') paletteMode = 2;
-  if (key === 'b' || key === 'B') paletteMode = 3;
-  if (key === 'k' || key === 'K') paletteMode = 4;
+  // palette shortcuts (with toggle)
+  if (key === 'c' || key === 'C') { paletteMode = 0; invertPalette = 0; syncUI_All(); } // Cは全クリア
+  if (key === 'r' || key === 'R') { paletteMode = (paletteMode === 1) ? 0 : 1; syncUI_All(); }
+  if (key === 'g' || key === 'G') { paletteMode = (paletteMode === 2) ? 0 : 2; syncUI_All(); }
+  if (key === 'y' || key === 'Y') { paletteMode = (paletteMode === 3) ? 0 : 3; syncUI_All(); }
+  if (key === 'k' || key === 'K') { paletteMode = (paletteMode === 4) ? 0 : 4; syncUI_All(); }
+  if (key === 'i' || key === 'I') { invertPalette = invertPalette ? 0 : 1; syncUI_All(); } // INVERTトグル
+
+  // glitch shortcuts (with toggle)
+  if (key === 'v' || key === 'V') { glitchMode = 0; window.__syncGlitchUI(); }
+  if (key === 'x' || key === 'X') { glitchMode = (glitchMode === 1) ? 0 : 1; window.__syncGlitchUI(); }
+  if (key === 'z' || key === 'Z') { glitchMode = (glitchMode === 2) ? 0 : 2; window.__syncGlitchUI(); }
+  if (key === 'w' || key === 'W') { glitchMode = (glitchMode === 3) ? 0 : 3; window.__syncGlitchUI(); }
+  
+  // O: ズームリセット
+  if (key === 'o' || key === 'O') {
+    manualZoomOffset = 1.0;
+    console.log("Zoom offset reset to 1.0");
+    if (typeof showUI === "function") showUI();
+  }
+  if (key === 't' || key === 'T') { glitchMode = (glitchMode === 4) ? 0 : 4; window.__syncGlitchUI(); }
+  if (key === 'b' || key === 'B') { glitchMode = (glitchMode === 5) ? 0 : 5; window.__syncGlitchUI(); }
+  
+  if (key === 'n' || key === 'N') { invertPalette = invertPalette ? 0 : 1; syncUI_All(); } // NもINVERT
+
+  // O: ズームオフセットとパンをリセット
+  if (key === 'o' || key === 'O') {
+    manualZoomOffset = 1.0;
+    manualPanX = 0.0;
+    manualPanY = 0.0;
+    panMoveAngle = 0.0;
+    panMoveSpeed = 0.0;
+    console.log("Zoom and pan reset");
+    if (typeof showUI === "function") showUI();
+  }
 
   if (key === 'h' || key === 'H') showHinotori = !showHinotori;
 
-  syncUI_All();
-  showUI();
+  if (key === 'd' || key === 'D') {
+    motionMode =
+      (motionMode === MOTION_DRONE)
+        ? MOTION_BEAT
+        : MOTION_DRONE;
 
-  if (key === ' ') {
-    const c = document.querySelector('canvas');
-    if (c) c.focus();
+    // UIがある場合は同期
+    if (typeof syncMotionUI === "function") {
+      syncMotionUI();
+    }
+
+    // UIが自動表示される設計なら一応呼ぶ（強制非表示中は無視される）
+    if (typeof showUI === "function") {
+      showUI();
+    }
+  }
+
+  // S: freeze all except hinotori
+  if (key === 's' || key === 'S') {
+    freezeOthers = !freezeOthers;
+
+    if (freezeOthers) {
+      // freeze開始：この瞬間の時刻/ビートをスナップショット
+      const tSnap = millis() * 0.001;
+      freezeWasOn = true;
+      freezeTimeT = tSnap;
+      freezeBeatLocal = computeBeatLocal(tSnap);
+      freezeBeatUniform = (motionMode === MOTION_DRONE) ? -1.0 : freezeBeatLocal;
+
+      // freeze中はburst等も止める
+      if (typeof stopBurst10 === 'function') stopBurst10();
+      burstHeld10 = false;
+    } else {
+      freezeWasOn = false;
+    }
+
+    if (typeof showUI === "function") showUI();
+  }
+
+
+  if (key === 'm' || key === 'M') {
+    uiForceHidden = !uiForceHidden;
+
+    if (uiForceHidden) {
+      uiRoot.hide();
+      uiVisible = false;
+      if (uiHideTimer) clearTimeout(uiHideTimer);
+    } else {
+      showUI(); // 復帰時は一度だけ表示
+    }
+  }
+
+  if (keyCode === ENTER || keyCode === RETURN){
+    startBurst10();
+    return;
+  }
+
+  if (key === ' '){
+    if (motionMode === MOTION_DRONE && bgMode === 10){
+      redrawDrone10();
+    }
+    return;
+  }
+
+  // ------------------------------------
+  // L : load manga / panel folder
+  // ------------------------------------
+  if (key === 'l' || key === 'L') {
+    if (typeof pickPhotoFolderAndLoad === "function") {
+      pickPhotoFolderAndLoad();
+      showUI?.();
+    } else {
+      console.warn("pickPhotoFolderAndLoad is not defined");
+    }
+  }
+
+  if (key === '1'){
+    showHinotori = true;
+    BPM = 131.0;
+    bpmSlider.value(BPM);
+    BEAT_DIV = 4;
+    beatSlider.value(BEAT_DIV);
+    bgMode = 3;
+    paletteMode = 0;
+    glitchMode = 1;
+    motionMode = MOTION_BEAT;
+
+  }
+
+  if (key === '2'){
+    showHinotori = false;
+    BPM = 131.0;
+    bpmSlider.value(BPM);
+    BEAT_DIV = 4;
+    beatSlider.value(BEAT_DIV);
+    bgMode = 0;
+    paletteMode = 1;
+    glitchMode = 2;
+    motionMode = MOTION_BEAT;
+  }
+
+  if (key === '3'){
+    showHinotori = false;
+    BPM = 131.0;
+    bpmSlider.value(BPM);
+    BEAT_DIV = 2;
+    beatSlider.value(BEAT_DIV);
+    bgMode = 7;
+    paletteMode = 0;
+    glitchMode = 4;
+    motionMode = MOTION_DRONE;
+  }
+
+  if (key === '4'){
+    showHinotori = false;
+    BPM = 120.0;
+    bpmSlider.value(BPM);
+    BEAT_DIV = 2;
+    beatSlider.value(BEAT_DIV);
+    bgMode = 10;
+    paletteMode = 1;
+    glitchMode = 0;
+    motionMode = MOTION_DRONE;
+  }
+
+  if (key === '5'){
+    showHinotori = false;
+    BPM = 120.0;
+    bpmSlider.value(BPM);
+    BEAT_DIV = 4;
+    beatSlider.value(BEAT_DIV);
+    bgMode = 10;
+    paletteMode = 5;
+    glitchMode = 0;
+    motionMode = MOTION_BEAT;
+  }
+
+  if (typeof syncMotionUI === "function") {
+    syncMotionUI();
+  }
+    syncUI_All();
+
+
+  // UIが自動表示される設計なら一応呼ぶ（強制非表示中は無視される）
+  if (typeof showUI === "function") {
+    showUI();
+  }
+}
+
+function keyReleased() {
+  // ENTER/RETURN を離したら burst 停止
+  if (keyCode === ENTER || keyCode === RETURN) {
+    stopBurst10();
+    burstHeld10 = false;
+    return;
   }
 }
 
@@ -702,7 +1360,7 @@ function syncUI_All(){
   if(bpmSlider) bpmSlider.value(BPM);
 
   if(beatValueSpan){
-    beatValueSpan.html(BEAT_DIV === 0 ? "FREE" : String(BEAT_DIV));
+    beatValueSpan.html(String(BEAT_DIV));
   }
   if(beatSlider){
     const idx = BEAT_OPTIONS.indexOf(BEAT_DIV);
@@ -711,8 +1369,20 @@ function syncUI_All(){
 
   Object.keys(palButtons).forEach(k => {
     const b = palButtons[k];
-    if (Number(k) === paletteMode) b.style("background:#fff;color:#000;");
-    else b.style("background:#222;color:#fff;");
+    const mode = Number(k);
+    if (mode === 0) {
+      // Cボタン: 全OFF時のみハイライト
+      if (paletteMode === 0 && invertPalette === 0) b.style("background:#fff;color:#000;");
+      else b.style("background:#222;color:#fff;");
+    } else if (mode === 5) {
+      // Iボタン: invertPaletteで判定
+      if (invertPalette) b.style("background:#fff;color:#000;");
+      else b.style("background:#222;color:#fff;");
+    } else {
+      // R/G/Y/Kボタン: paletteModeで判定
+      if (paletteMode === mode) b.style("background:#fff;color:#000;");
+      else b.style("background:#222;color:#fff;");
+    }
   });
 
   if(hinoBtn){
@@ -724,9 +1394,13 @@ function syncUI_All(){
       hinoBtn.style("background:#222;color:#fff;");
     }
   }
+
+  if (window.__syncGlitchUI) window.__syncGlitchUI();
 }
 
 function showUI(){
+  if (uiForceHidden) return; // ← 追加
+
   uiRoot.show();
   uiVisible = true;
 
@@ -738,6 +1412,8 @@ function showUI(){
 }
 
 function toggleUI(){
+  if (uiForceHidden) return; // ← 追加
+
   if (uiVisible) {
     uiRoot.hide();
     uiVisible = false;
@@ -764,4 +1440,345 @@ function windowResized(){
   if (beatSlider) beatSlider.style(`width:${w}px;`);
 
   syncUI_All();
+}
+
+
+// =====================================================
+// bgMode=10 : load images from a folder (NO manifest)
+// =====================================================
+
+// =====================================================
+// bgMode=10 : photo background (folder-selected, no manifest)
+// =====================================================
+
+function reseedPhoto(){
+  // re-randomize placements (use whole pool each time; no fixed 12-set)
+  photoPlacementsInit = false;
+  renderPhotoComposite();
+}
+
+
+
+function choosePhotoLayers(){
+  // legacy: keep API; now we render all images once into the 2x space
+}
+
+
+function updatePhotoCamera(tSec, beatLocal, beatUniform){
+  if (!pgPhoto) return;
+
+  const isDrone = (motionMode === MOTION_DRONE);
+
+  // base zoom (default 3x)
+  let z = 2.0;
+
+  // “広いキャンバス”上をカメラ中心が動く想定
+  // pan は「pgPhoto の中心」からのオフセット(px)
+  let px = photoCam.panX;
+  let py = photoCam.panY;
+
+  if (isDrone){
+    // DRONE：もっとダイナミックに漂う（複数周波数の合成）
+    const ax = pgPhoto.width  * 0.28;
+    const ay = pgPhoto.height * 0.28;
+
+    px = ax * Math.sin(tSec * 0.17) + ax * 0.55 * Math.sin(tSec * 0.41 + 1.7);
+    py = ay * Math.cos(tSec * 0.13) + ay * 0.65 * Math.sin(tSec * 0.29 + 2.4);
+
+    z = 2.2 + 1.2 * Math.sin(tSec * 0.23) + 0.35 * Math.sin(tSec * 0.71 + 0.8);
+    z = constrain(z, 1.4, 4.6);
+  } else {
+    // BEAT：移動もズームも無し（中央固定）
+    px = 0.0;
+    py = 0.0;
+    z = 2.0;
+  }
+
+  // clamp so we don't show outside area (no wrap)
+  const halfViewW = (width  * 0.5) / z;
+  const halfViewH = (height * 0.5) / z;
+
+  const maxPanX = Math.max(0.0, (pgPhoto.width  * 0.5) - halfViewW);
+  const maxPanY = Math.max(0.0, (pgPhoto.height * 0.5) - halfViewH);
+
+  photoCam.panX = constrain(px, -maxPanX, maxPanX);
+  photoCam.panY = constrain(py, -maxPanY, maxPanY);
+  photoCam.zoom = z;
+}
+
+
+function pickActivePhotos(){ /* deprecated: no fixed 12-set */ }
+
+
+function renderPhotoComposite(){
+  if (!pgPhoto) return;
+
+  pgPhoto.push();
+  pgPhoto.resetMatrix();
+  pgPhoto.clear();
+  pgPhoto.background(255);
+  pgPhoto.blendMode(pgPhoto.BLEND);
+
+  if (!photoImgs || photoImgs.length <= 0){
+    pgPhoto.pop();
+    return;
+  }
+
+  const count = Math.max(1, Math.min(panel10Count|0, 240));
+
+  for (let i = 0; i < count; i++){
+    let p = photoPlacements[i];
+    if (!p) p = (photoPlacements[i] = {x:0,y:0,s:1,idx:0});
+
+    if (!photoPlacementsInit){
+      // choose from the whole pool (not a fixed 12-set)
+      p.idx = Math.floor(Math.random() * photoImgs.length);
+
+      // random scale: later layers (drawn later) are smaller
+      const t = (count <= 1) ? 0.0 : (i / (count - 1));
+      const base = lerp(1.15, 0.35, t);           // back -> big, front -> small
+      const jitter = 0.70 + Math.random() * 0.60; // random
+      p.s = constrain(base * jitter, 0.18, 1.40);
+
+      const img0 = photoImgs[p.idx];
+      const w = img0 ? (img0.width  * p.s) : 256;
+      const h = img0 ? (img0.height * p.s) : 256;
+
+      p.x = Math.random() * Math.max(1, (pgPhoto.width  - w));
+      p.y = Math.random() * Math.max(1, (pgPhoto.height - h));
+    }
+
+    const img = photoImgs[p.idx];
+    if (!img) continue;
+
+    const dw = img.width  * p.s;
+    const dh = img.height * p.s;
+
+    drawImageWrap(pgPhoto, img, p.x, p.y, dw, dh);
+  }
+
+  photoPlacementsInit = true;
+  pgPhoto.pop();
+}
+
+
+
+function updateAndRenderPhotoBG(tSec, beatLocal, beatUniform){
+  if (burstHeld10){
+    // burst自体の描画（キュー処理など）は別で行う
+    return;
+  }
+
+  if (photoImgs.length <= 0){
+    if (photoStatusSpan) photoStatusSpan.html("(0) NO IMAGES");
+    return;
+  }
+
+  if (motionMode === MOTION_BEAT){
+    const step = Math.floor(beatLocal * Math.max(1, beatSpawnSubdiv|0));
+    if (step !== lastPhotoBeatStep){
+      lastPhotoBeatStep = step;
+
+      if (Math.random() < photoResetProb){
+        pgPhoto.clear();
+        pgPhoto.background(255);
+        photoPlacementsInit = false;
+      }
+
+      spawnPanelsOnBeat();
+    }
+  }
+
+  if (motionMode === MOTION_DRONE){
+    const step = Math.floor(tSec); // 1s tick
+    if (step !== lastPhotoDroneStep){
+      lastPhotoDroneStep = step;
+
+      if (Math.random() < photoResetProb){
+        pgPhoto.clear();
+        pgPhoto.background(255);
+        photoPlacementsInit = false;
+        renderPhotoComposite(); // redraw static layout (no burst)
+      }
+    }
+  }
+
+  updatePhotoCamera(tSec, beatLocal, beatUniform);
+
+  if (photoStatusSpan){
+    photoStatusSpan.html(`(${photoImgs.length}) LOADED`);
+  }
+}
+
+
+function spawnPanelsOnBeat(){
+  photoBlank10 = false;
+  if (!pgPhoto || !photoImgs || photoImgs.length === 0) return;
+
+  // 1回の呼び出しで何枚貼るか（beatSpawnMin/Max）
+  const n = Math.floor(beatSpawnMin + Math.random() * (Math.max(beatSpawnMin, beatSpawnMax) - beatSpawnMin + 1));
+
+  // 中心付近（散りすぎないようにガウス＋半径クランプ）
+  const cx = pgPhoto.width  * 0.5;
+  const cy = pgPhoto.height * 0.5;
+  const rMax = Math.max(8, beatSpawnJitterPx);
+
+  // “マシンガン感”：n枚を同フレームで短いストロークとして散布
+  // （より“時間差”が欲しい場合は、ここをキュー化して数フレームに分散すると良い）
+  let sc = 1.0;
+
+  for (let i = 0; i < n; i++){
+    const img = photoImgs[Math.floor(Math.random() * photoImgs.length)];
+    if (!img) continue;
+
+    // 位置：中心近傍（ガウス分布）
+    const ox = constrain(randomGaussian(0, rMax * 0.28), -rMax, rMax);
+    const oy = constrain(randomGaussian(0, rMax * 0.28), -rMax, rMax);
+
+    // スケール：ばらつき + 後ろほど小さく
+    const base = 0.35 + Math.random() * 0.95; // 0.35..1.30
+    const scale = base * sc;
+
+    const w = img.width  * scale;
+    const h = img.height * scale;
+
+    // 少し中心からズラす（完全中央固定になりすぎない）
+    const x = (cx + ox) - w * 0.5;
+    const y = (cy + oy) - h * 0.5;
+
+    drawImageWrap(pgPhoto, img, x, y, w, h);
+
+    // 後から貼るほど小さく
+    sc *= 0.90;
+  }
+}
+
+
+
+
+async function pickPhotoFolderAndLoad(){
+  photoImgs = [];
+  bgPhotoTex = null;
+  lastPhotoBgStep = -1;
+
+  const setStat = (msg) => {
+    if (photoStatusSpan) photoStatusSpan.html(msg);
+  };
+
+  // 再帰でディレクトリを走査（サブフォルダも拾う）
+  async function collectImageUrlsFromHandle(dirHandle, maxDepth = 6){
+    const out = [];
+    async function walk(handle, depth){
+      if (!handle || depth > maxDepth) return;
+
+      // entries() が最も互換が良い
+      for await (const [name, entry] of handle.entries()){
+        if (!entry) continue;
+        if (entry.kind === "file"){
+          const n = (entry.name || name || "").toLowerCase();
+          if (!(n.endsWith(".png") || n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".webp"))) continue;
+          try{
+            const file = await entry.getFile();
+            out.push(URL.createObjectURL(file));
+          }catch(e){
+            console.warn("getFile failed:", e);
+          }
+        } else if (entry.kind === "directory"){
+          await walk(entry, depth + 1);
+        }
+      }
+    }
+    await walk(dirHandle, 0);
+    return out;
+  }
+
+  setStat("…");
+
+  // 1) File System Access API（Chrome/Edge系）
+  if (window.showDirectoryPicker) {
+    try{
+      const handle = await window.showDirectoryPicker();
+      const urls = await collectImageUrlsFromHandle(handle);
+
+      await loadPhotoFromUrls(urls);
+
+      if (photoImgs.length === 0){
+        setStat("(0) NO IMAGES");
+        console.warn("No images found. Put images directly in the folder (or subfolders) and try again.");
+      } else {
+        setStat(`(${photoImgs.length}) LOADED`);
+      }
+      return;
+    }catch(e){
+      console.warn("Folder pick canceled / failed:", e);
+      setStat("(0)");
+      return;
+    }
+  }
+
+  // 2) フォールバック：webkitdirectory（Chrome系）
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.multiple = true;
+  inp.webkitdirectory = true;
+  inp.accept = "image/*";
+  inp.style.display = "none";
+  document.body.appendChild(inp);
+
+  inp.addEventListener("change", async () => {
+    const files = Array.from(inp.files || []);
+    const urls = files
+      .filter(f => (f.type || "").startsWith("image/"))
+      .map(f => URL.createObjectURL(f));
+
+    await loadPhotoFromUrls(urls);
+
+    if (photoImgs.length === 0){
+      setStat("(0) NO IMAGES");
+    } else {
+      setStat(`(${photoImgs.length}) LOADED`);
+    }
+
+    document.body.removeChild(inp);
+  });
+
+  inp.click();
+}
+
+async function loadPhotoFromUrls(urls){
+  urls = (urls || []).filter(Boolean);
+
+  // shuffle
+  for (let i = urls.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [urls[i], urls[j]] = [urls[j], urls[i]];
+  }
+
+  if (urls.length === 0){
+    console.warn("No images found in selected folder.");
+    return;
+  }
+
+  // p5 loadImage -> Promise
+  const loadOne = (u) => new Promise((resolve) => {
+    loadImage(u,
+      (img) => resolve(img),
+      () => resolve(null)
+    );
+  });
+
+  const imgs = [];
+  for (const u of urls){
+    const img = await loadOne(u);
+    if (img) imgs.push(img);
+  }
+
+  photoImgs = imgs;
+  photoImgIndex = 0;
+  bgPhotoTex = photoImgs[0] || null;
+
+  choosePhotoLayers();
+  reseedPhoto();
+  updatePhotoCamera(millis()*0.001, 0.0, -1.0);
+console.log("Loaded bg photos:", photoImgs.length);
 }
