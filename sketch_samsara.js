@@ -1133,25 +1133,16 @@ function keyPressed() {
     return;
   }
 
-  // BG shortcut keys (1-9, 0, -)
+  // BG shortcut keys
   if (key >= '1' && key <= '9') {
     const v = parseInt(key, 10);
     bgMode = v - 1;
-    console.log(`bgMode = ${bgMode}`);
-    syncUI_All();
-    showUI();
   }
   if (key === '0') {
     bgMode = 9;
-    console.log(`bgMode = ${bgMode}`);
-    syncUI_All();
-    showUI();
   }
   if (key === '-' || key === '_') {
     bgMode = 10;
-    console.log(`bgMode = ${bgMode}`);
-    syncUI_All();
-    showUI();
   }
 
   // arrows: ←→でランダム方向を設定（速度は0から加速開始）
@@ -1278,10 +1269,71 @@ function keyPressed() {
     }
   }
 
+  if (key === '1'){
+    showHinotori = true;
+    BPM = 131.0;
+    bpmSlider.value(BPM);
+    BEAT_DIV = 4;
+    beatSlider.value(BEAT_DIV);
+    bgMode = 3;
+    paletteMode = 0;
+    glitchMode = 1;
+    motionMode = MOTION_BEAT;
+
+  }
+
+  if (key === '2'){
+    showHinotori = false;
+    BPM = 131.0;
+    bpmSlider.value(BPM);
+    BEAT_DIV = 4;
+    beatSlider.value(BEAT_DIV);
+    bgMode = 0;
+    paletteMode = 1;
+    glitchMode = 2;
+    motionMode = MOTION_BEAT;
+  }
+
+  if (key === '3'){
+    showHinotori = false;
+    BPM = 131.0;
+    bpmSlider.value(BPM);
+    BEAT_DIV = 2;
+    beatSlider.value(BEAT_DIV);
+    bgMode = 7;
+    paletteMode = 0;
+    glitchMode = 4;
+    motionMode = MOTION_DRONE;
+  }
+
+  if (key === '4'){
+    showHinotori = false;
+    BPM = 120.0;
+    bpmSlider.value(BPM);
+    BEAT_DIV = 2;
+    beatSlider.value(BEAT_DIV);
+    bgMode = 10;
+    paletteMode = 1;
+    glitchMode = 0;
+    motionMode = MOTION_DRONE;
+  }
+
+  if (key === '5'){
+    showHinotori = false;
+    BPM = 120.0;
+    bpmSlider.value(BPM);
+    BEAT_DIV = 4;
+    beatSlider.value(BEAT_DIV);
+    bgMode = 10;
+    paletteMode = 5;
+    glitchMode = 0;
+    motionMode = MOTION_BEAT;
+  }
+
   if (typeof syncMotionUI === "function") {
     syncMotionUI();
   }
-  syncUI_All();
+    syncUI_All();
 
 
   // UIが自動表示される設計なら一応呼ぶ（強制非表示中は無視される）
