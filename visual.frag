@@ -622,62 +622,98 @@ vec3 bg_7sSGWD(vec2 fc){
 }
 
 // =====================================================
-// 5) bg_NdsSzl  ★軽量化版★
-//    変更点：
-//    - メインループ 75回 → 28回
-//    - tiling (mod) 廃止（uvをそのまま使用）
-//    - tanh近似をシンプルな clamp ベースに変更
-//    - 後処理の色補正を1ステップに簡略化
+// 5) bg_NdsSzl（元のfract版・復元）
 // =====================================================
 vec3 bg_NdsSzl(vec2 fc){
   float bt = getBeat();
+  const int ITERS = 12;
+  float t  = randomMoveTime(bt, TAU * 0.06, 501.0);
+  float tx = randomMoveTime(bt, TAU * 0.05, 502.0);
 
-  float blk = floor(bt);
-  float seed = isFree()
-    ? freeSeed(bt, 0.07, 501.1)
-    : hash21(vec2(blk, blk * 7.3));
+  vec3 col = vec3(0.0), col_prev = vec3(0.0);
+  vec2 uv = (fc * 10.0 - resolution.xy) / resolution.y / 10.0;
+  uv.x += tx * 0.20;
+  uv.y += t  * 0.20;
 
-  float t = randomMoveTime(bt, TAU * (0.06 + 0.04 * seed), 501.0) + seed * 3.0;
+  for(int c=0;c<ITERS;c++){
+    float scale = 2.48;
+    float scale1 = 1.045;
+    col_prev = col;
 
-  // UV（zoom・pan のみ適用、タイリング廃止）
-  vec2 uv = (fc - 0.5 * resolution.xy) / resolution.y / bgZoom;
-  uv += bgCamPx / resolution.y * 5.0;
+    for(int i=0;i<ITERS;i++){
+      uv = fract(-uv.yx / (scale1 * scale)) * scale;
+      uv.x *= scale1;
+      uv = fract(
+             uv + vec2(uv.x/scale - uv.y/scale1,
+                       uv.y/scale - uv.x/scale1) / scale
+           ) / scale1;
+      uv.y /= -scale1;
+    }
 
-  vec3 p = vec3(0.0);
-  float s = 0.0, d = 0.0;
-  vec4 o = vec4(0.0);
-
-  // ★ループを 28 回に削減（75→28）
-  for (float i = 0.0; i < 75.0; i += 1.0) {
-    p = 1.5 * vec3(uv * d, d + t);
-
-    s = 5e-3 + abs(s) * 0.07;
-    d += s;
-    o += (1.0 + sin(i * 0.5 + 1.5 * vec4(3.0, 1.5, 1.0, 0.0))) / s
-       + vec4(1.0, 1.0, 3.0, 1.0) / max(length(uv + vec2(0.0, -0.7)), 0.001);
-
-    float angle = d * 0.1 - 4.0;
-    float cs = cos(angle), sn = sin(angle);
-    p.xy = mat2(cs, sn, -sn, cs) * p.xy;
-
-    s += cos(p.x + p.y) * 2.0 + 1.5
-       + abs(dot(0.2 * sin(vec3(p.xy * 1.5, p.z + t * 5.0)),
-                 vec3(0.0, 9.0, 2.0)));
+    col.b = abs(fract(uv.y) - fract(uv.x));
+    col = (col + col_prev.yzx) / 2.125;
   }
 
-  // ★シンプルなトーンマップ（tanh近似廃止、x/(1+|x|) 型）
-  vec4 x = o * o / 3e7;
-  o = x / (1.0 + abs(x));   // smooth sigmoid, range 0..1
+  return clamp(col * 3.0, 0.0, 1.0);
+}
 
-  // ★後処理：青銀トーンへの変換を1ステップに統合
-  float L = dot(o.rgb, vec3(0.299, 0.587, 0.114));
-  // 低輝度部分を青寄りグレーで底上げ
-  float bgMask = 1.0 - smoothstep(0.08, 0.40, L);
-  vec3 col = mix(o.rgb, vec3(0.68, 0.70, 0.74), bgMask);
-  // WB冷却（青銀寄り）
-  col *= vec3(0.94, 0.98, 1.05);
+// =====================================================
+// 4用) bg_sinFBM  ★流体版★
+//    curl noise 近似でUVを歪め、流体のような渦巻き動作
+// =====================================================
+vec3 bg_sinFBM(vec2 fc){
+  float bt = getBeat();
 
-  return clamp(col, 0.0, 1.0);
+  // 時間：連続で流れるように
+  float t = time * (bpm / 120.0) * 0.3;
+
+  // UV: zoom + pan
+  vec2 I = 4.0 * (fc + fc - resolution.xy) / resolution.y / bgZoom;
+  I += bgCamPx / resolution.y * 8.0;
+
+  // DRONE: 緩やかに浮遊、BEAT: 拍ごとにジャンプ
+  if(isFree()){
+    float slow = bt * 0.08;
+    I += vec2(fbm1(slow, 41.3), fbm1(slow, 82.7)) * 12.0;
+  } else {
+    float blk = floor(bt);
+    I += vec2(hash21(vec2(blk,13.7)), hash21(vec2(blk,71.3))) * 20.0 - 10.0;
+  }
+
+  // 流体的UV歪み（curl場近似）
+  vec2 q = vec2(
+    sin(I.x * 0.7 + t * 0.4) + sin(I.y * 0.5 - t * 0.3),
+    sin(I.y * 0.7 - t * 0.4) + sin(I.x * 0.5 + t * 0.3)
+  );
+  vec2 r = vec2(
+    sin(I.x * 1.3 + q.y * 1.2 + t * 0.7) + sin(I.y * 0.9 + q.x * 0.8 - t * 0.5),
+    sin(I.y * 1.3 - q.x * 1.2 + t * 0.7) + sin(I.x * 0.9 - q.y * 0.8 + t * 0.5)
+  );
+  I += r * 1.4;
+
+  // 元の3パス sin fBm
+  vec4 O = vec4(0.0);
+
+  for(int ni = 1; ni <= 7; ni++){
+    float n = float(ni);
+    I += 1.6 * sin(I.yx * n + t * n) / n;
+  }
+  O += 1.0 + sin(I.x * 0.8 + 2.0 * vec4(0.0, 1.0, 2.0, 0.0));
+
+  for(int ni = 1; ni <= 7; ni++){
+    float n = float(ni);
+    I += 1.6 * sin(I.yx * n + t * n) / n;
+  }
+  O += 1.0 + sin(I.x * 0.8 + 1.0 * vec4(0.0, 1.0, 2.0, 0.0));
+
+  for(int ni = 1; ni <= 7; ni++){
+    float n = float(ni);
+    I += 1.6 * sin(I.yx * n + t * n) / n;
+  }
+  O += 1.0 + sin(I.x * 0.8 + 1.0 * vec4(0.0, 1.0, 2.0, 0.0));
+
+  O /= 6.0;
+  return clamp(O.rgb, 0.0, 1.0);
 }
 
 // 6) sin/fract
@@ -714,7 +750,7 @@ vec3 bg_cos20(vec2 fc){
   float tUVy  = randomMoveTime(bt, TAU * 0.05, 703.0);
   vec3 col = vec3(0.0);
   for(int c=0;c<3;c++){
-    vec2 uv = (fc * 50.0 - resolution.xy) / resolution.y / 10.0 / bgZoom;
+    vec2 uv = (fc * 10.0 - resolution.xy) / resolution.y / 10.0 / bgZoom;
     vec2 panUV = bgCamPx / resolution.y * 5.0;
     uv = uv + panUV;
     uv += vec2(tUVx, tUVy) / 10.0;
@@ -987,7 +1023,7 @@ vec3 getBackground(vec2 fc){
   if(bgMode==1) return bg_meguru(fc);
   if(bgMode==2) return bg_7sKSDd(fc);
   if(bgMode==3) return bg_sdjGWR(fc);
-  if(bgMode==4) return bg_7sSGWD(fc);
+  if(bgMode==4) return bg_sinFBM(fc);
   if(bgMode==5) return bg_NdsSzl(fc);
   if(bgMode==6) return bg_newSinFract(fc);
   if(bgMode==7) return bg_cos20(fc);

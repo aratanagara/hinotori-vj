@@ -372,8 +372,20 @@ function setup() {
     gl.compileShader(fragShader);
     
     if (!gl.getShaderParameter(fragShader, gl.COMPILE_STATUS)) {
+      const errLog = gl.getShaderInfoLog(fragShader);
       console.error("=== FRAGMENT SHADER COMPILE ERROR ===");
-      console.error(gl.getShaderInfoLog(fragShader));
+      console.error(errLog);
+      // エラー行を特定して前後を表示
+      const match = errLog.match(/ERROR:\s*\d+:(\d+)/);
+      if (match) {
+        const errLine = parseInt(match[1]);
+        const lines = fragDisplaySrcArr;
+        for (let i = Math.max(0, errLine - 3); i <= Math.min(lines.length - 1, errLine + 1); i++) {
+          console.error(`  ${i + 1}${i + 1 === errLine ? " >>>" : "    "} ${lines[i]}`);
+        }
+      }
+      // コンパイル失敗時はシェーダーを作らず終了
+      return;
     } else {
       console.log("✓ Fragment shader compiled");
     }
@@ -932,8 +944,26 @@ function keyPressed() {
 
   if (key === 'v' || key === 'V') showVisual = !showVisual;
 
-  // [ / ] キー: hinotori/ga-ohを切り替え
-  if (key === '[' || key === ']') {
+  // [ / ] キー: BEATを上下
+  if (key === '[') {
+    const idx = BEAT_OPTIONS.indexOf(BEAT_DIV);
+    if (idx > 0) {
+      BEAT_DIV = BEAT_OPTIONS[idx - 1];
+      syncUI_All();
+      showUI();
+    }
+  }
+  if (key === ']') {
+    const idx = BEAT_OPTIONS.indexOf(BEAT_DIV);
+    if (idx < BEAT_OPTIONS.length - 1) {
+      BEAT_DIV = BEAT_OPTIONS[idx + 1];
+      syncUI_All();
+      showUI();
+    }
+  }
+
+  // ¥ キー: hinotori/ga-ohを切り替え
+  if (key === '¥' || keyCode === 220) {
     currentVisualIndex = (currentVisualIndex + 1) % 2;
     if (currentVisualIndex === 0) {
       keyVisual = hinotoriImg;
