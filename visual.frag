@@ -69,18 +69,14 @@ const int   TIMES = 4;
 const float RING_SAT = 1.60;
 const float RING_BRI = 1.12;
 
-// 背景 “止まる拍” の確率
+// 背景 "止まる拍" の確率
 const float HOLD_PROB = 0.18;
 
 // ===== FREE motion tuning =====
-// ドローン(浮遊)の移動距離（大きいほど動く）
 const float FREE_HOVER_GAIN = 12.0;
-// ドリフト(直線流れ)の速さ（小さいほど遅い）
 const float FREE_DRIFT_GAIN = 0.10;
-
-// FREEズーム：振幅（±）と速度（btスケール）
-const float FREE_ZOOM_AMP   = 0.50; // 0.10 = ±10%
-const float FREE_ZOOM_RATE  = 0.10; // 低いほどゆっくり
+const float FREE_ZOOM_AMP   = 0.50;
+const float FREE_ZOOM_RATE  = 0.10;
 
 // =====================================================
 // utils
@@ -149,7 +145,6 @@ bool isFree(){
   return f;
 }
 
-// FREE は time ベースで連続進行、速度のみ bpm 参照
 float freeBeat(){
   float bpmScale = bpm / 120.0;
   return time * 6.0 * bpmScale;
@@ -164,13 +159,12 @@ float getBeat(){
 }
 
 // =====================================================
-// smooth random helpers (FREE用：リセット感の除去)
+// smooth random helpers
 // =====================================================
 float smooth01(float x){
   return x*x*(3.0-2.0*x);
 }
 
-// 1D value noise (continuous)
 float vnoise1(float t, float salt){
   float i = floor(t);
   float f = fract(t);
@@ -180,7 +174,6 @@ float vnoise1(float t, float salt){
   return mix(a, b, e);
 }
 
-// cheap fbm (continuous wandering)
 float fbm1(float t, float salt){
   float n = 0.0;
   float amp = 0.55;
@@ -190,26 +183,47 @@ float fbm1(float t, float salt){
     amp *= 0.55;
     frq *= 2.05;
   }
-  return n; // ~[-1..1]
+  return n;
 }
 
 float freeSeed(float bt, float rate, float salt){
   float t = bt * rate;
-  return vnoise1(t, salt); // 0..1
+  return vnoise1(t, salt);
 }
 
 // =====================================================
-// FREE zoom (background only)
+// FREE zoom
 // =====================================================
 float freeZoom(float bt, float salt){
-  // 0..1
   float z = vnoise1(bt * FREE_ZOOM_RATE, salt + 900.1);
-  // -1..1 へ
   z = (z - 0.5) * 2.0;
-  // 少し丸める（ギクつき防止）
   z = z * (0.85 + 0.15 * vnoise1(bt * (FREE_ZOOM_RATE * 2.0), salt + 901.7));
-  // 1±amp
   return 1.0 + z * FREE_ZOOM_AMP;
+}
+
+// =====================================================
+// DRAW mode random camera
+// =====================================================
+vec2 drawRandomCam(float bt, float salt){
+  float blk = floor(bt);
+  float rx = hash21(vec2(blk, salt + 100.0));
+  float ry = hash21(vec2(blk, salt + 200.0));
+  vec2 range = resolution * 0.0025;
+  vec2 offset = vec2((rx - 0.5) * 3.0 * range.x, (ry - 0.5) * 3.0 * range.y);
+  return bgCamPx + offset;
+}
+
+float drawRandomZoom(float bt, float salt){
+  float blk = floor(bt);
+  float rz = hash21(vec2(blk, salt + 300.0));
+  return mix(1.5, 2.0, rz);
+}
+
+float drawRandomAngle(float bt, float salt){
+  float blk = floor(bt);
+  float ra = hash21(vec2(blk, salt + 400.0));
+  float angleRange = 15.0 * PI / 180.0;
+  return (ra - 0.5) * 2.0 * angleRange;
 }
 
 vec2 applyZoomToFC(vec2 fc, float zoom){
@@ -258,12 +272,10 @@ struct MoveRand {
 
 MoveRand moveRand(float bt, float salt){
   float blk = floor(bt);
-
   float r0 = hash21(vec2(blk, 0.3 + salt));
   float r1 = hash21(vec2(blk, 1.1 + salt));
   float r2 = hash21(vec2(blk, 2.7 + salt));
   float r3 = hash21(vec2(blk, 5.9 + salt));
-
   MoveRand m;
   m.hold  = step(1.0 - HOLD_PROB, r0);
   m.dir   = step(0.5, r1) * 2.0 - 1.0;
@@ -277,11 +289,9 @@ float freeBlock(float bt){
   return floor(bt * 0.15 * scale);
 }
 
-// FREE時：ドリフト寄りのウェイト（0..1、連続）
-// だいたい10%くらい“ドリフト寄り”になるようにする
 float freeDriftWeight(float bt, float salt){
-  float v = vnoise1(bt * 0.06, salt + 77.7);  // 0..1
-  return smoothstep(0.90, 1.00, v);           // 上位10%付近だけ 0→1
+  float v = vnoise1(bt * 0.06, salt + 77.7);
+  return smoothstep(0.90, 1.00, v);
 }
 
 vec2 freeDriftDir(float bt, float salt){
@@ -298,39 +308,50 @@ vec2 freeHoverVec(float bt, float salt){
 }
 
 float randomMoveTime(float bt, float baseScale, float salt){
-
   if(isFree()){
-    // 連続ウェイト（切替段差なし）
     float w = freeDriftWeight(bt, salt);
-
-    // ---- ドリフト成分（直線流れ） ----
     vec2 dir = freeDriftDir(bt, salt);
     float spd = baseScale * FREE_DRIFT_GAIN * (bpm / 120.0);
-    // btで積分することで連続的に進む（速すぎるなら FREE_DRIFT_GAIN を下げる）
     float driftVal = (dir.x + dir.y) * bt * spd;
-
-    // ---- ドローン浮遊成分（ランダム軌道）----
     vec2 hv = freeHoverVec(bt, salt);
-
-    float slow = fbm1(bt * 0.05, salt + 100.0); // 大きく漂う
-    float mid  = hv.x + hv.y;                   // 中くらいの揺れ
-
-    float hoverVal =
-        (slow * 1.4 + mid * 0.6)
-        * baseScale
-        * FREE_HOVER_GAIN;
-
-    // 常に両方を走らせて補間（切替の“切れ目”を消す）
+    float slow = fbm1(bt * 0.05, salt + 100.0);
+    float mid  = hv.x + hv.y;
+    float hoverVal = (slow * 1.4 + mid * 0.6) * baseScale * FREE_HOVER_GAIN;
     return mix(hoverVal, driftVal, w);
   }
-
-  // -------- BEAT MODE（既存） --------
   MoveRand m = moveRand(bt, salt);
   float blk = floor(bt);
   float ph  = fract(bt);
   float e   = easeOutQuint(ph);
   float adv = mix(e * m.speed, 0.0, m.hold);
   return (blk + adv) * m.dir * m.dist * baseScale;
+}
+
+// =====================================================
+// DRONE mode seamless camera
+// =====================================================
+vec2 droneSeamlessCam(float bt, float salt){
+  float drift = 0.12;
+  float tx = randomMoveTime(bt, TAU * 0.08, salt + 100.0);
+  float ty = randomMoveTime(bt, TAU * 0.06, salt + 200.0);
+  vec2 offset = vec2(tx, ty) * resolution.y * 0.1 * drift;
+  return bgCamPx + offset;
+}
+
+float droneSeamlessZoom(float bt, float salt){
+  float drift = 0.12;
+  float z = vnoise1(bt * FREE_ZOOM_RATE, salt + 500.0);
+  z = (z - 0.5) * 2.0;
+  z = z * (0.85 + 0.15 * vnoise1(bt * (FREE_ZOOM_RATE * 2.0), salt + 501.0));
+  return 1.0 + z * (FREE_ZOOM_AMP * 0.5) * drift;
+}
+
+float droneSeamlessAngle(float bt, float salt){
+  float drift = 0.12;
+  float a = vnoise1(bt * 0.08, salt + 600.0);
+  a = (a - 0.5) * 2.0;
+  float angleRange = 10.0 * PI / 180.0;
+  return a * angleRange * drift;
 }
 
 
@@ -341,27 +362,19 @@ float randomMoveTime(float bt, float baseScale, float salt){
 // 0) VanGogh
 vec3 bg_vangogh(vec2 fc){
   float bt   = getBeat();
-
   float blk  = floor(bt);
   float seed = 0.0;
-
   if(isFree()){
-    seed = freeSeed(bt, 0.07, 777.1); // 0..1（連続）
+    seed = freeSeed(bt, 0.07, 777.1);
   }else{
     seed = hash21(vec2(blk, blk * 7.1));
   }
-
   float t = randomMoveTime(bt, TAU * (0.18 + 0.10 * seed), 101.0) + seed * 6.0;
-
-  // 統一されたbgZoomを適用
   vec2 p = (fc - 0.5 * resolution.xy) / ZOOM / bgZoom;
   p.x *= resolution.x / resolution.y;
-  
-  // パン（カメラ移動）をUV空間で適用
   vec2 panUV = bgCamPx / resolution.y * 5.0;
   p = p + panUV;
-
-  vec2 off = vec2(0.0);
+  vec2 off = vec2(1.0);
   if(isFree()){
     float ox = freeSeed(bt, 0.05, 33.1);
     float oy = freeSeed(bt, 0.05, 91.7);
@@ -370,7 +383,6 @@ vec3 bg_vangogh(vec2 fc){
     off = vec2(hash21(vec2(blk, 33.1)), hash21(vec2(blk, 91.7))) - 0.5;
   }
   p += off * 0.35;
-
   for(int i=0;i<TIMES;i++){
     float d = ceil(-sin(t) + length(p) * 6.0) / 3.0;
     p += vec2(
@@ -378,33 +390,161 @@ vec3 bg_vangogh(vec2 fc){
      -sin(p.x - sin(d)) - cos(t / 4.0)
     );
   }
-
   vec3 c = 0.5 + 0.5 * vec3(cos(p.x * 0.2), sin(p.y * 0.4), sin(p.x * 0.2));
   c = saturateColor(c, 1.15);
   return clamp(c, 0.0, 1.0);
 }
 
-// 1) simple noise
-vec3 bg_noise(vec2 fc){
+// 1) bg_meguru
+#define BN_DST 45.0
+#define BN_ITR 45
+#define BN_SRF 0.2546263
+#define BN_PI  acos(-1.0)
+#define BN_RT(X) mat2(cos(X), sin(X), -sin(X), cos(X))
+
+float bn_t = 0.0;
+
+float bn_hash11(float x){
+  return fract(sin(x * 127.1) * 43758.5453123);
+}
+
+vec3 bn_cosineGradient(float tt, vec3 a, vec3 b, vec3 c, vec3 d){
+  return a + b * cos(6.28318 * (c * tt + d));
+}
+
+float bn_box(vec3 sp, vec3 d){
+  sp = abs(sp) - d;
+  return max(max(sp.x, sp.y), sp.z);
+}
+
+float bn_k3d(vec3 sp, vec3 d, vec3 dm, float s, vec3 r){
+  float sc  = 1.0;
+  float sdf = BN_DST;
+  for(int i=0;i<2;i++){
+    sp = abs(sp) - d;
+    sp.xy *= BN_RT(r.x);
+    sp.zy *= BN_RT(r.y);
+    sp.zy *= BN_RT(r.z);
+    sdf = min(sdf, bn_box(sp, dm) / sc);
+    sp *= sc;
+    sc *= s;
+  }
+  return sdf;
+}
+
+vec2 bn_map(vec3 sp){
+  sp.zy *= BN_RT(sp.x * 0.2 + bn_t);
+  sp.xy *= BN_RT(sp.z * 0.05 + bn_t);
+  float dst0 = bn_k3d(sp, vec3(7.0, 5.0, 3.0), vec3(5.0, 0.7, 0.7), 1.7, vec3(2.0, 3.0, 2.0));
+  return vec2(dst0, 0.0);
+}
+
+vec3 bn_mrch(vec3 ro, vec3 rd){
+  float d0 = 0.0;
+  float id = 0.0;
+  float it = 0.0;
+  for(int i=0;i<BN_ITR;i++){
+    it = float(i);
+    vec3 sp = ro + rd * d0;
+    vec2 ds = bn_map(sp);
+    if(abs(ds.x) < BN_SRF || d0 > BN_DST){
+      if(abs(ds.x) < BN_SRF){ d0 = 0.0; }else{ break; }
+    }
+    d0 += ds.x;
+    id  = ds.y;
+  }
+  if(d0 > BN_DST) d0 = 0.0;
+  return vec3(d0, id, it);
+}
+
+float vnoise2(vec2 p, float salt){
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  vec2 s = vec2(salt, salt*1.37);
+  float a = hash21(i + vec2(0.0,0.0) + s);
+  float b = hash21(i + vec2(1.0,0.0) + s);
+  float c = hash21(i + vec2(0.0,1.0) + s);
+  float d = hash21(i + vec2(1.0,1.0) + s);
+  return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
+}
+
+float fbm2(vec2 p, float salt){
+  float n = 0.0;
+  float a = 0.55;
+  mat2 m = mat2(0.8, -0.6, 0.6, 0.8);
+  for(int i=0;i<5;i++){
+    n += a * vnoise2(p, salt + float(i)*19.7);
+    p = m * p * 2.02;
+    a *= 0.5;
+  }
+  return n;
+}
+
+vec3 bg_meguru(vec2 fc){
   float bt = getBeat();
-  
-  // ズームとパンを適用
-  vec2 p = (fc - 0.5 * resolution.xy) / bgZoom;
-  vec2 panUV = bgCamPx / resolution.y * 5.0;
-  p = p + panUV * resolution.y;
-  
-  vec2 uv = p / resolution;
-
-  float ty = randomMoveTime(bt, 0.22, 10.0);
-  float tx = randomMoveTime(bt, 0.12, 20.0);
-
-  uv += vec2(tx, ty);
-  
-  // タイリングでシームレスに（境界が見えない）
-  uv = fract(uv);
-  
-  float n = hash21(floor(uv * 420.0));
-  return vec3(0.12 + 0.40 * n);
+  bool freeModeActive = isFree();
+  float b = floor(bt);
+  float j = freeModeActive ? 0.0 : bn_hash11(b);
+  vec2 camPx;
+  float zoom;
+  float angle;
+  float tm;
+  if(freeModeActive){
+    camPx = droneSeamlessCam(bt, 777.0);
+    zoom = droneSeamlessZoom(bt, 888.0) * bgZoom;
+    angle = droneSeamlessAngle(bt, 999.0);
+    tm = bt * 1.20 + sin(bt * 0.35) * 0.8 + sin(bt * 0.11) * 1.6;
+  } else {
+    camPx = drawRandomCam(bt, 777.0);
+    zoom = drawRandomZoom(bt, 888.0) * bgZoom;
+    angle = drawRandomAngle(bt, 999.0);
+    tm = bt;
+  }
+  vec2 uv = (fc - 0.5 * resolution) / (resolution.y * zoom);
+  float cosA = cos(angle);
+  float sinA = sin(angle);
+  uv = vec2(cosA * uv.x - sinA * uv.y, sinA * uv.x + cosA * uv.y);
+  uv += camPx / resolution.y * 5.0;
+  uv.x *= 0.5;
+  float beatKick = freeModeActive ? 0.0 : (j * 10.0);
+  bn_t = mod((tm * 0.05) + beatKick, BN_PI * 30.0);
+  vec3 ro = vec3(0.5, 0.0, -20.0);
+  vec3 w = normalize(-ro);
+  vec3 u = normalize(cross(w, vec3(0.0, 1.0, 0.0)));
+  vec3 v = cross(u, w);
+  vec3 rd = normalize(mat3(u, v, w) * vec3(uv, 0.5));
+  float uvLen = length(uv);
+  vec3 bgc = vec3(1.0 - (uvLen - 1.0)) * 0.001;
+  vec3 amb = bgc * 0.1;
+  vec3 ds = bn_mrch(ro, rd);
+  float d0 = ds.x;
+  if(d0 <= 0.0) return vec3(0.73, 0.77, 0.80);
+  vec3 sp = ro + rd * d0;
+  float paletteTime = bt * 0.05;
+  float paletteBlock = floor(paletteTime);
+  float paletteFract = fract(paletteTime);
+  float paletteMix = paletteFract * paletteFract * (3.0 - 2.0 * paletteFract);
+  float seed1 = paletteBlock;
+  float seed2 = paletteBlock + 1.0;
+  vec3 a1 = vec3(hash21(vec2(seed1,1.0))*0.3+0.4, hash21(vec2(seed1,2.0))*0.3+0.4, hash21(vec2(seed1,3.0))*0.3+0.4);
+  vec3 a2 = vec3(hash21(vec2(seed2,1.0))*0.3+0.4, hash21(vec2(seed2,2.0))*0.3+0.4, hash21(vec2(seed2,3.0))*0.3+0.4);
+  vec3 b1 = vec3(hash21(vec2(seed1,4.0))*0.4+0.3, hash21(vec2(seed1,5.0))*0.4+0.3, hash21(vec2(seed1,6.0))*0.4+0.3);
+  vec3 b2 = vec3(hash21(vec2(seed2,4.0))*0.4+0.3, hash21(vec2(seed2,5.0))*0.4+0.3, hash21(vec2(seed2,6.0))*0.4+0.3);
+  vec3 c1 = vec3(hash21(vec2(seed1,7.0))*0.4+0.8, hash21(vec2(seed1,8.0))*0.4+0.8, hash21(vec2(seed1,9.0))*0.4+0.8);
+  vec3 c2 = vec3(hash21(vec2(seed2,7.0))*0.4+0.8, hash21(vec2(seed2,8.0))*0.4+0.8, hash21(vec2(seed2,9.0))*0.4+0.8);
+  vec3 d1 = vec3(hash21(vec2(seed1,10.0)), hash21(vec2(seed1,11.0)), hash21(vec2(seed1,12.0)));
+  vec3 d2 = vec3(hash21(vec2(seed2,10.0)), hash21(vec2(seed2,11.0)), hash21(vec2(seed2,12.0)));
+  vec3 a = mix(a1, a2, paletteMix);
+  vec3 b0 = mix(b1, b2, paletteMix);
+  vec3 c = mix(c1, c2, paletteMix);
+  vec3 d = mix(d1, d2, paletteMix);
+  float phase = freeModeActive ? (tm * 0.005) : (bt * 0.05 + j * 1.5);
+  float spatialGrad = dot(sp, vec3(0.030, 0.024, 0.040));
+  float colorParam = spatialGrad + d0 * 0.024 + bn_t * 0.08 + phase;
+  vec3 palette = bn_cosineGradient(colorParam, a, b0, c, d);
+  vec3 rainbow_fcl = palette / (d0 * 0.005 + 0.05);
+  return amb + clamp(rainbow_fcl, 0.0, 10.0) * 0.15 - 0.35;
 }
 
 // 2) 7sKSDd
@@ -412,16 +552,11 @@ vec3 bg_7sKSDd(vec2 fc){
   float bt = getBeat();
   float tx = randomMoveTime(bt, TAU * 0.08, 201.0);
   float ty = randomMoveTime(bt, TAU * 0.06, 202.0);
-
   vec3 col = vec3(0.0);
-  
-  // ズームとパンを適用
   vec2 uv1 = (fc * 10.0 - resolution.xy) / resolution.y / 10.0 / bgZoom;
   vec2 panUV = bgCamPx / resolution.y * 5.0;
   uv1 = uv1 + panUV;
-  
   uv1 += vec2(tx, ty) / 10.0;
-
   for(int c=0;c<3;c++){
     vec2 uv = uv1;
     for(int i=0;i<6;i++){
@@ -439,26 +574,18 @@ vec3 bg_sdjGWR(vec2 fc){
   float bt = getBeat();
   float tx = randomMoveTime(bt, TAU * 0.07, 301.0);
   float ty = randomMoveTime(bt, TAU * 0.05, 302.0);
-
   vec3 col = vec3(0.0);
-  
-  // ズームとパンを適用
   vec2 uv = (fc * 10.0 - resolution.xy) / resolution.y / 10.0 / bgZoom;
   vec2 panUV = bgCamPx / resolution.y * 5.0;
   uv = uv + panUV;
-  
   uv += vec2(tx * 0.5, ty * 0.33) / 4.0;
-
   for(int c=0;c<3;c++){
     float scale = 5.6;
     float scale1 = 1.5;
     float s1 = scale1 * scale;
     for(int i=0;i<6;i++){
       uv = fract(uv / s1) * s1;
-      uv = -fract(
-              uv / (2.0 - abs((uv.x - uv.y) / 16.0))
-            - (uv / (2.5 + fract(uv.x + uv.y))) / scale
-           ) * scale / scale1 + s1;
+      uv = -fract(uv / (2.0 - abs((uv.x - uv.y) / 16.0)) - (uv / (2.5 + fract(uv.x + uv.y))) / scale) * scale / scale1 + s1;
       uv /= scale1 + col.yx;
       uv = uv.yx + col.xy;
       uv.x /= -1.1;
@@ -473,26 +600,18 @@ vec3 bg_7sSGWD(vec2 fc){
   float bt = getBeat();
   float tx = randomMoveTime(bt, TAU * 0.07, 401.0);
   float ty = randomMoveTime(bt, TAU * 0.05, 402.0);
-
   vec3 col = vec3(0.0);
-  
-  // ズームとパンを適用
   vec2 uv = (fc * 10.0 - resolution.xy) / resolution.y / 10.0 / bgZoom;
   vec2 panUV = bgCamPx / resolution.y * 5.0;
   uv = uv + panUV;
-  
   uv += vec2(tx * 0.5, ty * 0.33) / 4.0;
-
   for(int c=0;c<3;c++){
     float scale = 5.5;
     float scale1 = 1.4;
     float s1 = scale1 * scale;
     for(int i=0;i<6;i++){
       uv = fract(uv / s1) * s1;
-      uv = -fract(
-              uv / (2.0 - abs((uv.x - uv.y) / 16.0))
-            - (uv / (2.5 + fract(uv.x + uv.y))) / scale
-           ) * scale / scale1 + s1;
+      uv = -fract(uv / (2.0 - abs((uv.x - uv.y) / 16.0)) - (uv / (2.5 + fract(uv.x + uv.y))) / scale) * scale / scale1 + s1;
       uv /= scale1 + col.yx;
       uv = uv.yx + col.xy;
       uv.x *= -(1.0 + col.x / scale);
@@ -502,98 +621,62 @@ vec3 bg_7sSGWD(vec2 fc){
   return col;
 }
 
-// 5) ShaderToy-based effect (with BPM sync and camera pan/zoom)
+// =====================================================
+// 5) bg_NdsSzl  ★軽量化版★
+//    変更点：
+//    - メインループ 75回 → 28回
+//    - tiling (mod) 廃止（uvをそのまま使用）
+//    - tanh近似をシンプルな clamp ベースに変更
+//    - 後処理の色補正を1ステップに簡略化
+// =====================================================
 vec3 bg_NdsSzl(vec2 fc){
   float bt = getBeat();
-  
-  // ズームとパンを適用してUV座標を計算
+
+  float blk = floor(bt);
+  float seed = isFree()
+    ? freeSeed(bt, 0.07, 501.1)
+    : hash21(vec2(blk, blk * 7.3));
+
+  float t = randomMoveTime(bt, TAU * (0.06 + 0.04 * seed), 501.0) + seed * 3.0;
+
+  // UV（zoom・pan のみ適用、タイリング廃止）
   vec2 uv = (fc - 0.5 * resolution.xy) / resolution.y / bgZoom;
-  vec2 panUV = bgCamPx / resolution.y * 5.0;
-  uv = uv + panUV;
-  
-  // タイリングサイズ（大きいほど繰り返しの単位が大きく、余白が増える）
-  float tileSize = 10.0;
-  // UV座標をタイリング（fract でループ）
-  // 中心を原点にしてループ
-  uv = mod(uv + tileSize * 0.5, tileSize) - tileSize * 0.5;
-  
-  // BPM同期の時間（randomMoveTimeを使用）
-  float t = randomMoveTime(bt, TAU * 0.06, 501.0);
-  
+  uv += bgCamPx / resolution.y * 5.0;
+
   vec3 p = vec3(0.0);
   float s = 0.0, d = 0.0;
   vec4 o = vec4(0.0);
-  
-  // =========================
-  // メイン生成
-  // =========================
-  for (float i = 0.0; i < 100.0; i += 1.0) {
+
+  // ★ループを 28 回に削減（75→28）
+  for (float i = 0.0; i < 75.0; i += 1.0) {
     p = 1.5 * vec3(uv * d, d + t);
-    
+
     s = 5e-3 + abs(s) * 0.07;
     d += s;
     o += (1.0 + sin(i * 0.5 + 1.5 * vec4(3.0, 1.5, 1.0, 0.0))) / s
-       + vec4(1.0, 1.0, 3.0, 1.0) / length(uv + vec2(0.0, -0.7));
-    
-    // 回転行列を適用
+       + vec4(1.0, 1.0, 3.0, 1.0) / max(length(uv + vec2(0.0, -0.7)), 0.001);
+
     float angle = d * 0.1 - 4.0;
-    float c = cos(angle);
-    float sn = sin(angle);
-    p.xy = mat2(c, sn, -sn, c) * p.xy;
-    
+    float cs = cos(angle), sn = sin(angle);
+    p.xy = mat2(cs, sn, -sn, cs) * p.xy;
+
     s += cos(p.x + p.y) * 2.0 + 1.5
        + abs(dot(0.2 * sin(vec3(p.xy * 1.5, p.z + t * 5.0)),
                  vec3(0.0, 9.0, 2.0)));
   }
-  
-  // =========================
-  // トーンマップ（tanh代替）
-  // =========================
+
+  // ★シンプルなトーンマップ（tanh近似廃止、x/(1+|x|) 型）
   vec4 x = o * o / 3e7;
-  // tanh(x) ≈ x * (27 + x²) / (27 + 9x²) for small x
-  vec4 x2 = x * x;
-  o = x * (27.0 + x2) / (27.0 + 9.0 * x2);
-  
-  // =========================
-  // 1) 色差ベース一括：干渉色を抑制
-  // =========================
-  float L  = dot(o.rgb, vec3(0.299, 0.587, 0.114));
-  vec3  ch = o.rgb - vec3(L);
-  float sat = length(ch);
-  float lumW = smoothstep(0.35, 0.95, L);
-  float satW = smoothstep(0.04, 0.20, sat);
-  float k = 1.10 * lumW * satW;
-  vec3 col = vec3(L) + ch * (1.0 - k);
-  
-  // =========================
-  // 2) 帯（低彩度・中明度）を暗め青シルバーへ
-  // =========================
-  float Lc = dot(col, vec3(0.299, 0.587, 0.114));
-  vec3  ch2 = col - vec3(Lc);
-  float sat2 = length(ch2);
-  float grayMask =
-      (1.0 - smoothstep(0.03, 0.10, sat2)) *
-      smoothstep(0.25, 0.80, Lc) *
-      (1.0 - smoothstep(0.88, 0.98, Lc));
-  vec3 blueSilver = vec3(Lc * 0.78) * vec3(0.88, 0.93, 1.08);
-  col = mix(col, blueSilver, grayMask);
-  
-  // =========================
-  // 3) 背景を「帯の輪郭グレー」に揃える
-  //    → 暗部を輪郭グレーまで底上げ（黒を残さない）
-  // =========================
-  float Lf = dot(col, vec3(0.299, 0.587, 0.114));
-  // 輪郭グレー（ここが背景色の本体）
-  vec3 outlineGray = vec3(0.68, 0.70, 0.74);  // 青寄りのグレー
-  // 暗部ほど強く outlineGray に寄せる（=背景が輪郭グレーになる）
-  float bgMask = 1.0 - smoothstep(0.08, 0.35, Lf);
-  col = mix(col, outlineGray, bgMask);
-  
-  // =========================
-  // 4) 仕上げ：全体をほんのり青銀へ（WB冷却）
-  // =========================
+  o = x / (1.0 + abs(x));   // smooth sigmoid, range 0..1
+
+  // ★後処理：青銀トーンへの変換を1ステップに統合
+  float L = dot(o.rgb, vec3(0.299, 0.587, 0.114));
+  // 低輝度部分を青寄りグレーで底上げ
+  float bgMask = 1.0 - smoothstep(0.08, 0.40, L);
+  vec3 col = mix(o.rgb, vec3(0.68, 0.70, 0.74), bgMask);
+  // WB冷却（青銀寄り）
   col *= vec3(0.94, 0.98, 1.05);
-  
+
   return clamp(col, 0.0, 1.0);
 }
 
@@ -602,35 +685,24 @@ vec3 bg_newSinFract(vec2 fc){
   float bt = getBeat();
   const int ITERS = 12;
   float t = randomMoveTime(bt, TAU / 16.0, 601.0);
-
   vec3 col = vec3(0.0), col_prev = vec3(0.0);
-  
-  // ズームとパンを適用
   vec2 uv = (fc * 10.0 - resolution.xy) / resolution.y / 10.0 / bgZoom;
   vec2 panUV = bgCamPx / resolution.y * 5.0;
   uv = uv + panUV;
-  
   uv.y += t;
-
   for(int c=0;c<ITERS;c++){
     float scale  = 2.25;
     float scale1 = 1.9;
     col_prev = col;
-
     for(int i=0;i<ITERS;i++){
       uv = sin(uv.yx / (scale1*scale)) * (scale1*scale);
-      uv = -fract(
-              uv + vec2(uv.x/scale - uv.y/scale1,
-                        uv.y/scale - uv.x/scale1) / scale
-            ) * scale / scale1;
+      uv = -fract(uv + vec2(uv.x/scale - uv.y/scale1, uv.y/scale - uv.x/scale1) / scale) * scale / scale1;
       uv.y /= -scale1;
       scale1 += (uv.x * (0.005 * fract(uv.x + t * (scale1*scale))));
     }
-
     col.b = abs(fract(uv.y) - fract(uv.x));
     col = (col + col_prev.yzx) / 2.0;
   }
-
   return clamp(col * 3.0, 0.0, 1.0);
 }
 
@@ -640,150 +712,300 @@ vec3 bg_cos20(vec2 fc){
   float tBase = randomMoveTime(bt, TAU * 0.10, 701.0);
   float tUVx  = randomMoveTime(bt, TAU * 0.06, 702.0);
   float tUVy  = randomMoveTime(bt, TAU * 0.05, 703.0);
-
   vec3 col = vec3(0.0);
-
   for(int c=0;c<3;c++){
-    // 統一されたbgZoomを適用（小さいほどZOOM、大きいほど引き）
     vec2 uv = (fc * 50.0 - resolution.xy) / resolution.y / 10.0 / bgZoom;
-    
-    // パン（カメラ移動）をUV空間で適用（シンプルかつ大きく）
-    // bgCamPxはピクセル単位、これをUV空間にスケール
-    vec2 panUV = bgCamPx / resolution.y * 5.0; // 5.0倍で効果を大きく
-    uv = uv + panUV; // +符号で直感的な方向
-    
+    vec2 panUV = bgCamPx / resolution.y * 5.0;
+    uv = uv + panUV;
     uv += vec2(tUVx, tUVy) / 10.0;
-
     float t = tBase + float(c) / 10.0;
-
     float scale  = 5.0;
     float scale1 = 1.4;
-
     for(int i=0;i<20;i++){
       float tt = t * 0.5;
-
-      uv = cos(
-             uv / (2.0 + sin((uv.x + uv.y) / 10.0))
-           - (uv.yx / (2.0 + sin(fract(tt + uv.x + uv.y)))) / scale
-           ) * scale / 1.5 + scale1 * scale;
-
+      uv = cos(uv / (2.0 + sin((uv.x + uv.y) / 10.0)) - (uv.yx / (2.0 + sin(fract(tt + uv.x + uv.y)))) / scale) * scale / 1.5 + scale1 * scale;
       uv /= scale1;
       uv = uv.yx + col.xy;
     }
-
     col[c] = fract(uv.x - uv.y);
   }
-
   return clamp(col, 0.0, 1.0);
 }
 
-// 8) Inkelly（maskをcoverで取る）
 vec3 bg_inkelly(vec2 fc){
   float bt = getBeat();
-
-  float ph = 0.0;
-  if(isFree()){
-    ph = fract(bt * 0.25);
-  }else{
-    ph = fract(bt);
-  }
+  float ph = isFree() ? fract(bt * 0.25) : fract(bt);
   float ease = easeOutQuint(ph);
-
   vec2 uv = fc / resolution;
-
   vec2 uvm = uvCover(uv, resolution, texSize);
   float mask = 0.0;
   if(uvm.x>=0.0 && uvm.x<=1.0 && uvm.y>=0.0 && uvm.y<=1.0){
     mask = texture2D(tex1, uvm).r;
     mask = smoothstep(0.2, 0.8, mask);
   }
-
   float m = texture2D(bgExtra, uv).r * mask;
-
-  float th = 0.5;
-  if(isFree()){
-    th = 0.50 + 0.06 * sin(bt * 0.80);
-  }else{
-    th = mix(0.42, 0.58, ease);
-  }
-
+  float th = isFree() ? (0.50 + 0.06 * sin(bt * 0.80)) : mix(0.42, 0.58, ease);
   vec2 px = vec2(1.0 / resolution.x, 1.0 / resolution.y);
   float mR = texture2D(bgExtra, uv + vec2(px.x, 0.0)).r * mask;
   float mL = texture2D(bgExtra, uv - vec2(px.x, 0.0)).r * mask;
   float mU = texture2D(bgExtra, uv + vec2(0.0, px.y)).r * mask;
   float mD = texture2D(bgExtra, uv - vec2(0.0, px.y)).r * mask;
-
-  // threshold を硬く
   m = smoothstep(th - 0.008, th + 0.008, m);
-
-  // edge 強化
   float edge = abs(mR - mL) + abs(mU - mD);
   edge = pow(edge, 0.65);
   edge *= mix(2.8, 3.0, ease);
   edge = max(edge - 0.5, 0.0);
-
-  // ソリッド線
-  float ink = smoothstep(0.040, 0.045, edge);
-  // さらに硬くするなら
-  // float ink = step(0.04, edge);
-
+  float ink = step(0.03, edge);
   vec3 paper = vec3(0.91, 0.94, 0.91);
   vec3 inkCol = vec3(0.02);
-  
   vec3 col = paper;
   col = mix(col, inkCol, ink);
-
   return col;
 }
 
-// selector
-
 // =====================================================
-// bgMode=10 : panel collage (CPU composited in bgPhoto)
-// - no wrap: clamp outside to white
-// - camera: center-based pan(px) + zoom
+// bgMode=9 : panel collage
 // =====================================================
 vec3 bg_photo(vec2 fc){
-  // fc: pixel coords in the main screen (0..resolution)
   float z = max(0.001, bgZoom);
-
-  // map screen to bgPhoto pixel space
   vec2 view = (fc - 0.5 * resolution) / z;
   vec2 p = 0.5 * bgPhotoSize + bgCamPx + view;
-
-  // clamp (no looping)
   vec2 uv = clamp(p / max(bgPhotoSize, vec2(1.0)), vec2(0.0), vec2(1.0));
   return texture2D(bgPhoto, uv).rgb;
 }
 
+// Manga helpers
+float manga_rand(float n){return fract(cos(n*89.42)*343.42);}
+
+float manga_nz(vec2 nv, float t){
+    float o = 0.0;
+    float i = 0.2;
+    for(int iter = 0; iter < 7; iter++){
+        o += abs(dot(sin(nv * i * 64.0), vec2(0.05))) / i;
+        i = i * 1.4142;
+    }
+    return mix(o, distance(vec2(0.0), nv), 0.5 + (sin(t)/2.0));
+}
+
+float manga_rMix(float a, float b, float s){
+    s = manga_rand(s);
+    if(s>0.9) return sin(a);
+    if(s>0.8) return sqrt(abs(a));
+    if(s>0.7) return a+b;
+    if(s>0.6) return a-b;
+    if(s>0.5) return b-a;
+    if(s>0.4) return manga_nz(vec2(a,b), time);
+    if(s>0.3) return b/(a==0.0?0.01:a);
+    if(s>0.2) return a/(b==0.0?0.01:b);
+    if(s>0.1) return a*b;
+    return cos(a);
+}
+
+vec3 manga_hsl2rgb(in vec3 c){
+    vec3 rgb = clamp(abs(mod(c.x*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0, 0.0, 1.0);
+    return c.z + c.y * (rgb-0.5)*(1.0-abs(2.0*c.z-1.0));
+}
+
+vec3 manga_gpc(float t) {
+    return 0.5 + 0.5*cos(vec3(0.0,2.0,4.0) + t*2.0);
+}
+
+vec3 manga_contrast(vec3 color, float value) {
+    return 0.5 + value * (color - 0.5);
+}
+
+vec3 manga_addColor(float num, float seed, float alt, int PALETTE){
+    if(abs(num) > 1000000.0){num = alt * seed;}
+    if(PALETTE == 7){ return manga_contrast(manga_gpc(num), 1.7); }
+    else if(PALETTE > 2 || (PALETTE == 1 && manga_rand(seed+19.0)>0.3)){
+        float sat = 1.0;
+        if(num<0.0){sat = 1.0-(1.0/(abs(num)+1.0));}
+        float light = 1.0-(1.0/(abs(num)+1.0));
+        vec3 col = manga_hsl2rgb(vec3(fract(abs(num)), sat, light));
+        if(PALETTE == 1){col = col * 2.0;}
+        return col;
+    } else {
+        vec3 col = vec3(fract(abs(num)), 1.0/num, 1.0-fract(abs(num)));
+        if(manga_rand(seed*2.0)>0.5){col = col.gbr;}
+        if(manga_rand(seed*3.0)>0.5){col = col.gbr;}
+        if(PALETTE == 1){col = col + (1.0+cos(manga_rand(num)+vec3(4.0,2.0,1.0))) / 2.0;}
+        return col;
+    }
+}
+
+vec3 manga_sanitize(vec3 dc){
+    dc.r = min(1.0, dc.r);
+    dc.g = min(1.0, dc.g);
+    dc.b = min(1.0, dc.b);
+    bool badR = !(dc.r>=0.0) && !(dc.r<0.0);
+    bool badG = !(dc.g>=0.0) && !(dc.g<0.0);
+    bool badB = !(dc.b>=0.0) && !(dc.b<0.0);
+    if(badR || badG || badB){ return vec3(1.0,0.0,0.0); }
+    return dc;
+}
+
+vec3 manga_mainAgg(vec2 uv, float seed, float t){
+    uv.x -= 0.5 * resolution.x / resolution.y;
+    uv.y -= 0.5;
+    float zoom = 4.0 + (3.0*(sin(t/1.5)+1.0));
+    vec2 guv = uv * zoom;
+    float x = guv.x;
+    float y = guv.y;
+    float o = manga_nz(guv, t);
+    int PALETTE = int(floor(8.0*manga_rand(seed+66.0)));
+    vec3 col = vec3(0.0);
+    float cn = 1.0;
+    float v0=1.0,v1=10.0,v2=x,v3=y,v4=x*x,v5=y*y,v6=x*x*x,v7=y*y*y;
+    float v8=x*x*x*x,v9=y*y*y*y,v10=x*y*x,v11=y*y*x,v12=sin(y),v13=cos(y);
+    float v14=sin(x),v15=cos(x),v16=sin(y)*sin(y),v17=cos(y)*cos(y),v18=2.0;
+    float v19=distance(vec2(x,y),vec2(0.0)),v20=3.14159,v21=atan(y,x)*4.0;
+    float v22=o,v23=distance(vec2(x,y),vec2(0.0))*sin(atan(y,x));
+    float total = 0.0, sub = 0.0;
+    for(int i = 0; i < 12; i++){
+        float val1=v2; if(i==1)val1=v3; if(i==2)val1=v4; if(i==3)val1=v5;
+        if(i==4)val1=v12; if(i==5)val1=v13; if(i==6)val1=v14; if(i==7)val1=v15;
+        if(i==8)val1=v19; if(i==9)val1=v21; if(i==10)val1=v22; if(i==11)val1=v23;
+        float val2=v3; if(i==1)val2=v4; if(i==2)val2=v5; if(i==3)val2=v6;
+        if(i==4)val2=v13; if(i==5)val2=v14; if(i==6)val2=v15; if(i==7)val2=v16;
+        if(i==8)val2=v20; if(i==9)val2=v22; if(i==10)val2=v23; if(i==11)val2=v19;
+        val1=val1*(sin(t*manga_rand(seed+float(i)))*manga_rand(seed+float(i)));
+        val2=val2*(sin(t*manga_rand(seed+float(i+5)))*manga_rand(seed+float(i+5)));
+        if(manga_rand(seed+float(i+3))>manga_rand(seed)){
+            sub=(sub==0.0)?manga_rMix(val1,val2,seed+float(i+4)):manga_rMix(sub,manga_rMix(val1,val2,seed+float(i+4)),seed+float(i));
+        }else{
+            sub=(sub==0.0)?val1:manga_rMix(sub,val1,seed+float(i));
+        }
+        if(abs(sub)<1.0){seed+=100.0;PALETTE=int(floor(8.0*manga_rand(seed+66.0)));}
+        if(manga_rand(seed+float(i))>manga_rand(seed)/2.0){
+            total=(total==0.0)?sub:manga_rMix(total,sub,seed+float(i*2));
+            sub=0.0;
+            col+=manga_addColor(total,seed+float(i),v21,PALETTE);
+            cn+=1.0;
+        }
+    }
+    total=(sub==0.0)?total:manga_rMix(total,sub,seed);
+    col+=manga_addColor(total,seed,v21,PALETTE);
+    col/=cn;
+    if(PALETTE<3){col/=(3.0*(0.5+manga_rand(seed+13.0)));}
+    if(PALETTE==4){col=pow(col,1.0/col)*1.5;}
+    if(PALETTE==2||PALETTE==5){col=manga_hsl2rgb(col);}
+    if(PALETTE==6){col=manga_hsl2rgb(manga_hsl2rgb(col)); if(manga_rand(seed+17.0)>0.5){col=col.gbr;} if(manga_rand(seed+19.0)>0.5){col=col.gbr;}}
+    col=manga_sanitize(col);
+    return col;
+}
+
+mat2 manga_rot2D(float a){float s=sin(a),c=cos(a);return mat2(c,-s,s,c);}
+
+float manga_halftone(vec2 uv, float brightness, float dotSize, float angle){
+    mat2 rot=manga_rot2D(angle);
+    vec2 rotUV=rot*uv*dotSize;
+    vec2 cellUV=fract(rotUV)-0.5;
+    float radius=0.45*(1.0-brightness);
+    return smoothstep(radius-0.02,radius,length(cellUV));
+}
+
+vec3 manga_mangaHalftone(vec2 uv, vec3 col){
+    float gray=dot(col,vec3(0.299,0.587,0.114));
+    return col*manga_halftone(uv,gray,80.0,0.0);
+}
+
+float manga_hash_f(float x){return fract(sin(x*12.9898)*43758.5453);}
+float manga_hash2_f(vec2 v){return manga_hash_f(v.x+manga_hash_f(v.y));}
+float manga_hash3_f(vec3 v){return manga_hash_f(v.x+manga_hash_f(v.y+manga_hash_f(v.z)));}
+float manga_gSeed_f;
+void manga_initSeed(vec2 v){manga_gSeed_f=manga_hash2_f(v);}
+void manga_initSeed3(vec3 v){manga_gSeed_f=manga_hash3_f(v);}
+float manga_random(){manga_gSeed_f=manga_hash_f(manga_gSeed_f+0.1);return fract(manga_gSeed_f);}
+float manga_easeOutQuint(float t){return 1.0-pow(1.0-t,5.0);}
+
+vec4 manga_applySubd(vec2 uv, float timeIndex){
+    vec2 cellId=vec2(0.0);
+    vec4 cell=vec4(0.0,0.0,1.0,1.0);
+    manga_initSeed(vec2(timeIndex,777.0));
+    float numSplits=2.0+floor(manga_random()*2.0);
+    for(int i=0;i<5;i++){
+        float fi=float(i);
+        if(fi>=numSplits) break;
+        manga_initSeed3(vec3(cellId,timeIndex));
+        float r=mix(0.40,0.60,manga_random());
+        bool splitHorizontal=manga_random()>0.5;
+        if(splitHorizontal){
+            float split=cell.x+cell.z*r;
+            if(uv.x>split){cell.x+=cell.z*r;cell.z*=1.0-r;cellId.x+=exp2(fi);}
+            else{cell.z*=r;}
+        }else{
+            float split=cell.y+cell.w*r;
+            if(uv.y>split){cell.y+=cell.w*r;cell.w*=1.0-r;cellId.y+=exp2(fi);}
+            else{cell.w*=r;}
+        }
+    }
+    return cell;
+}
+
+vec3 bg_manga(vec2 fc){
+    vec2 uv=fc/resolution;
+    float sceneTime=2.0;
+    float animDuration=0.5;
+    float timeIndex=floor(time/sceneTime);
+    float sceneProgress=fract(time/sceneTime);
+    vec4 cell=manga_applySubd(uv,timeIndex);
+    vec2 cellId=floor(cell.xy*16.0);
+    manga_initSeed3(vec3(cellId,timeIndex));
+    float cellDelay=manga_random()*0.3;
+    float cellAnimProgress=clamp((sceneProgress-cellDelay)/animDuration,0.0,1.0);
+    float easedProgress=manga_easeOutQuint(cellAnimProgress);
+    float dirRand=manga_random();
+    vec2 slideDir;
+    if(dirRand<0.25)slideDir=vec2(-1.0,0.0);
+    else if(dirRand<0.5)slideDir=vec2(1.0,0.0);
+    else if(dirRand<0.75)slideDir=vec2(0.0,-1.0);
+    else slideDir=vec2(0.0,1.0);
+    vec2 slideOffset=slideDir*(1.0-easedProgress);
+    vec2 offsetPixels=slideOffset*resolution;
+    vec2 animatedPixelPos=fc-offsetPixels;
+    vec2 animatedUV=animatedPixelPos/resolution;
+    bool inCell=(animatedUV.x>=cell.x&&animatedUV.x<=cell.x+cell.z&&animatedUV.y>=cell.y&&animatedUV.y<=cell.y+cell.w);
+    if(!inCell){return vec3(1.0);}
+    vec2 cellUV=(animatedUV-cell.xy)/cell.zw;
+    vec3 col=manga_mainAgg(cellUV,manga_random(),time);
+    float marginX=5.0,marginY=20.0,borderPixels=5.0;
+    vec2 pixelPos=animatedPixelPos;
+    vec2 cellStart=cell.xy*resolution;
+    vec2 cellSize=cell.zw*resolution;
+    vec2 cellEnd=cellStart+cellSize;
+    float leftDist=pixelPos.x-cellStart.x;
+    float rightDist=cellEnd.x-pixelPos.x;
+    float topDist=pixelPos.y-cellStart.y;
+    float bottomDist=cellEnd.y-pixelPos.y;
+    bool inMargin=(leftDist<marginX||rightDist<marginX||topDist<marginY||bottomDist<marginY);
+    bool isBorder=!inMargin&&(leftDist<(marginX+borderPixels)||rightDist<(marginX+borderPixels)||topDist<(marginY+borderPixels)||bottomDist<(marginY+borderPixels));
+    if(inMargin){col=vec3(1.0);}else if(isBorder){col=vec3(0.0);}
+    return col;
+}
+
 vec3 getBackground(vec2 fc){
-  if(bgMode==1) return bg_noise(fc);
+  if(bgMode==1) return bg_meguru(fc);
   if(bgMode==2) return bg_7sKSDd(fc);
   if(bgMode==3) return bg_sdjGWR(fc);
   if(bgMode==4) return bg_7sSGWD(fc);
   if(bgMode==5) return bg_NdsSzl(fc);
   if(bgMode==6) return bg_newSinFract(fc);
   if(bgMode==7) return bg_cos20(fc);
-  if(bgMode==8) return bg_inkelly(fc);
+  if(bgMode==8) return bg_manga(fc);
   if(bgMode==9){
-    // bgPhoto は 2D合成キャンバス（2x window）
-    // カメラ：スクロール(bgCamPx) + ズーム(bgZoom)、端はラップ
     vec2 uv = fc / resolution;
     float z = max(0.001, bgZoom);
     vec2 cam = bgCamPx / max(bgPhotoSize, vec2(1.0));
     vec2 suv = (uv - 0.5) / z + 0.5 + cam;
-    // wrap
     suv = fract(suv);
-    // p5テクスチャの上下反転補正
     suv.y = 1.0 - suv.y;
     return texture2D(bgPhoto, suv).rgb;
   }
-
   return bg_vangogh(fc);
 }
 
 // =====================================================
-// global palette mode (r/g/b/k)
+// global palette mode
 // =====================================================
 float luma709(vec3 c){
   return dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -799,473 +1021,258 @@ vec3 applyTwoColor(vec3 c, vec3 c0, vec3 c1, vec2 fc){
 
 vec3 applyMangaTone(vec3 c, vec2 fc){
   float l = luma709(c);
-
   const float CONTRAST = 2.6;
   l = clamp((l - 0.5) * CONTRAST + 0.5, 0.0, 1.0);
-
   l = smoothstep(0.32, 0.78, l);
-
   const float DOT_SIZE = 3.0;
   vec2 cell = floor(fc / DOT_SIZE);
   vec2 f = fract(fc / DOT_SIZE) - 0.5;
-
   float d = bayer4(cell * DOT_SIZE) - 0.5;
   float l2 = clamp(l + d * 0.06, 0.0, 1.0);
-
   float radius = (1.0 - l2) * 0.52;
-
   float dist = length(f);
   float dot = step(dist, radius);
-
   float v = mix(1.0, 0.0, dot);
   return vec3(v);
 }
 
 vec3 applyPaletteAll(vec3 col, vec2 fc){
   if(paletteMode == 0) return col;
-
   if(paletteMode == 1){
     vec3 bg = vec3(0.56, 0.61, 0.70);
     vec3 fg = vec3(0.82, 0.00, 0.00);
-    // SWITCH: 2色を入れ替え
-    if(switchPalette != 0){
-      vec3 temp = bg;
-      bg = fg;
-      fg = temp;
-    }
+    if(switchPalette != 0){vec3 temp=bg;bg=fg;fg=temp;}
     return applyTwoColor(col, bg, fg, fc);
   }
-
   if(paletteMode == 2){
     vec3 bg = vec3(0.00, 0.38, 1.00);
     vec3 fg = vec3(0.10, 0.78, 0.18);
-    // SWITCH: 2色を入れ替え
-    if(switchPalette != 0){
-      vec3 temp = bg;
-      bg = fg;
-      fg = temp;
-    }
+    if(switchPalette != 0){vec3 temp=bg;bg=fg;fg=temp;}
     return applyTwoColor(col, bg, fg, fc);
   }
-
   if(paletteMode == 3){
     vec3 bg = vec3(0.84, 0.30, 0.86);
     vec3 fg = vec3(0.90, 0.78, 0.02);
-    // SWITCH: 2色を入れ替え
-    if(switchPalette != 0){
-      vec3 temp = bg;
-      bg = fg;
-      fg = temp;
-    }
+    if(switchPalette != 0){vec3 temp=bg;bg=fg;fg=temp;}
     return applyTwoColor(col, bg, fg, fc);
   }
-
-  if(paletteMode == 5){
-    return vec3(1.0) - col;
-  }
-
+  if(paletteMode == 5){ return vec3(1.0) - col; }
   return applyMangaTone(col, fc);
 }
 
-
-
 // =====================================================
-// glitch UV modification (before texture sampling)
+// glitch
 // =====================================================
 vec2 applyGlitchUV(vec2 uv, vec2 fc){
   if (glitchMode != 1) return uv;
   float k = clamp(glitchAmt, 0.0, 1.0);
   if (k <= 0.00001) return uv;
-
   float b = glitchBeat;
   float stepB = floor(b * 16.0);
   float seed = fract(sin((stepB + 1.0) * 78.233 + glitchSeed * 11.7) * 12345.678);
-  
-  // ビート同期：1拍ごとに強弱をつける
   float beatPhase = fract(b);
-  // ビートの最初の25%で発生、残り75%は休止
   float beatActive = step(beatPhase, 0.25);
-  // ビート内での強度カーブ（0→1→0）
   float beatCurve = sin(min(beatPhase / 0.25, 1.0) * PI);
-  
-  // 全体的な発生確率（常時ではなく間欠的に）
   float globalTrigger = step(0.3, seed) * beatActive * k;
   if (globalTrigger < 0.001) return uv;
-  
-  // スライス高さ：極端に指数関数的（2px〜600px）
   float sliceRandom = hash11(seed * 3.7);
-  // 6乗で極端な偏り：ほとんどが細く、稀に極太
   float sliceHeightPx = 2.0 + pow(sliceRandom, 6.0) * 598.0;
-  
   float pixelY = uv.y * resolution.y;
   float sid = floor(pixelY / sliceHeightPx);
   float r1 = hash11(sid * 13.37 + seed * 91.7);
-  
-  // スライスごとの発生確率（7乗で極端に選択的）
   float intensity = pow(r1, 7.0);
-  float shouldGlitch = step(0.8, r1); // 上位20%のみ
-  
+  float shouldGlitch = step(0.8, r1);
   if (shouldGlitch < 0.5) return uv;
-
-  // シフト量も極端に（5乗）
   float shiftBase = pow(hash11(sid * 7.31 + seed * 19.1), 5.0);
   float shiftAmt = (shiftBase - 0.5) * 3.0 * intensity * beatCurve;
   float shiftAmt2 = (pow(hash11(sid * 29.3 + seed * 3.7), 3.0) - 0.5) * 0.8 * intensity;
   float beatShift = sin(b * TAU) * 0.3 * intensity * beatCurve;
   float randomShift = (pow(hash11(sid * 17.3 + seed * 5.3), 4.0) - 0.5) * 1.2 * intensity;
-  
-  // UV X座標をシフト（ループ）
   float totalShift = globalTrigger * (shiftAmt + shiftAmt2 + beatShift + randomShift);
   uv.x = fract(uv.x + totalShift);
-  
   return uv;
 }
 
-// glitchMode=3,4,5用のUV変換（複数モード対応版）
 vec2 applyGlitchUV_Multi(vec2 uv, vec2 fc){
   float k = clamp(glitchAmt, 0.0, 1.0);
   if (k <= 0.00001) return uv;
-  
   float b = glitchBeat;
   float stepB = floor(b * 16.0);
   float seed = fract(sin((stepB + 1.0) * 78.233 + glitchSeed * 11.7) * 12345.678);
-  
-  // glitchMode=3: NOISE DISPLACEMENT (disabled - 色ノイズのみ使用)
-  if (glitchMode == 3) {
-    // 変位なし、色処理のみに任せる
-    return uv;
-  }
-  
-  // glitchMode=4: FOCUSED TWIST
+  if (glitchMode == 3) return uv;
   if (glitchMode == 4) {
     float stepB4 = floor(b * 4.0);
     float seed4 = fract(sin((stepB4 + 1.0) * 78.233 + glitchSeed * 11.7) * 12345.678);
-    
     float beatPhase = fract(b);
     float twistAmount = sin(beatPhase * PI);
     twistAmount = pow(twistAmount, 0.8) * k;
-    
     vec2 center = vec2(hash11(seed4 * 3.1), hash11(seed4 * 7.7));
     vec2 toCenter = uv - center;
     float dist = length(toCenter);
     float radius = 0.3 + hash11(seed4 * 11.3) * 0.4;
     float influence = smoothstep(radius * 1.2, 0.0, dist);
-    
     if(influence > 0.001){
       float rotation = (hash11(seed4 * 13.7) - 0.5) * PI * 10.0 * twistAmount;
       float distFactor = 1.0 - pow(dist / radius, 0.5);
       rotation *= distFactor;
-      
       float scaleBase = hash11(seed4 * 19.1);
       float scale = (scaleBase < 0.5) ? (1.0 - twistAmount * 0.9) : (1.0 + twistAmount * 2.0);
-      
       float angle = atan(toCenter.y, toCenter.x);
       float newAngle = angle + rotation;
       float newDist = dist * scale;
-      
       vec2 displaced = center + vec2(cos(newAngle) * newDist, sin(newAngle) * newDist);
       uv = mix(uv, displaced, influence);
     }
     return uv;
   }
-  
-  // glitchMode=5: MOTION BLUR
   if (glitchMode == 5) {
     float beatPhase = fract(b);
-    float blurAmount = sin(beatPhase * PI);
-    blurAmount = pow(blurAmount, 1.0) * k;
-    
-    // 2拍ごとに方向が変わる
+    float blurAmount = pow(sin(beatPhase * PI), 1.0) * k;
     float stepB2 = floor(b * 0.5);
     float directionSeed = fract(sin(stepB2 * 78.233 + glitchSeed * 11.7) * 12345.678);
-    
-    // 8方向からランダムに選択（上下左右+斜め4方向）
-    // 0:右、1:右下、2:下、3:左下、4:左、5:左上、6:上、7:右上
     float dirIndex = floor(directionSeed * 8.0);
-    float motionAngle = dirIndex * (TAU / 8.0); // 45度刻み
-    
-    // ピクセルごとに微妙な揺らぎ
+    float motionAngle = dirIndex * (TAU / 8.0);
     float pixelNoise = hash11(fc.x * 0.01 + fc.y * 0.01 + seed * 7.3);
     motionAngle += (pixelNoise - 0.5) * 0.3;
-    
     vec2 motionDir = vec2(cos(motionAngle), sin(motionAngle));
     float displacement = blurAmount * 0.15;
     float depthVariation = hash11(fc.x * 0.05 + fc.y * 0.05 + seed * 13.7);
     displacement *= (0.5 + depthVariation * 0.5);
-    
     return uv + motionDir * displacement;
   }
-  
   return uv;
 }
 
-// =====================================================
-// glitch (screen-space, affects the whole composite)
-// =====================================================
 float gSat(float x){ return clamp(x, 0.0, 1.0); }
-
-vec3 glitchOp(vec3 c, float k, float m){
-  // m selects operation; k is strength
-  // channel shuffle / invert / crush
-  if (m < 0.33){
-    c = vec3(c.g, c.b, c.r);
-  } else if (m < 0.66){
-    c = 1.0 - c;
-  } else {
-    float q = mix(10.0, 4.0, k);
-    c = floor(c * q + 0.5) / q;
-  }
-  // contrast bump
-  c = mix(c, pow(c, vec3(0.75)), k*0.35);
-  return c;
-}
 
 vec3 applyGlitchAll(vec3 col, vec2 fc){
   if (glitchMode <= 0) return col;
   float k = clamp(glitchAmt, 0.0, 1.0);
   if (k <= 0.00001) return col;
-
-  // beat-synced step (16th by default on JS side)
   float b = glitchBeat;
-  float stepB = floor(b * 4.0); // internal: 4x; JS already controls seed per subdiv
+  float stepB = floor(b * 4.0);
   vec2 uv = fc / max(resolution, vec2(1.0));
-
-  // deterministic seed per step (stable inside the step)
   float seed = fract(sin((stepB + 1.0) * 78.233 + glitchSeed * 11.7) * 12345.678);
-
-  // -----------------------
-  // Mode 1: CUTUP (SLICE) - 背景とhinotoriはすでにUVレベルで処理済み
-  // -----------------------
-  if (glitchMode == 1){
-    return col;
-  }
-
-  // -----------------------
-  // Mode 2: MOSAIC/SLIT（モザイク/スリット）
-  // -----------------------
+  if (glitchMode == 1){ return col; }
   if (glitchMode == 2){
-    // 時間経過で細かい→大きいモザイクへ変化
     float beatPhase = fract(b);
-    // 0→1で細かい→大きいへ変化
     float sizeAnim = smoothstep(0.0, 1.0, beatPhase);
-    
-    // モザイクサイズ（細かい4pxから大きい32pxへ）
     float mosaicSize = mix(4.0, 32.0, sizeAnim * hash11(seed * 7.3));
     vec2 mosaicCell = floor(fc / mosaicSize);
-    
-    // スリット効果
     float slitType = hash11(seed * 3.7);
-    // スリット幅も時間で変化
     float slitFreq = mix(30.0, 8.0, sizeAnim * hash11(seed * 9.1));
     float slit = 0.0;
-    
-    if(slitType < 0.5){
-      slit = step(0.5, fract(uv.x * slitFreq + seed));
-    } else {
-      slit = step(0.5, fract(uv.y * slitFreq + seed));
-    }
-    
-    // モザイクとスリットの切り替え
+    if(slitType < 0.5){ slit = step(0.5, fract(uv.x * slitFreq + seed)); }
+    else { slit = step(0.5, fract(uv.y * slitFreq + seed)); }
     float effectType = hash11(seed * 11.3);
     vec3 result = col;
-    
     if(effectType < 0.5){
-      // モザイク効果
       float blockHash = hash21(mosaicCell + seed * 7.7);
-      if(blockHash > 0.7){
-        result = vec3(col.g, col.b, col.r);
-      } else if(blockHash > 0.4){
-        result = vec3(col.b, col.r, col.g);
-      }
+      if(blockHash > 0.7){ result = vec3(col.g, col.b, col.r); }
+      else if(blockHash > 0.4){ result = vec3(col.b, col.r, col.g); }
     } else {
-      // スリット効果
       result = mix(col, vec3(1.0) - col, slit * 0.7);
     }
-    
     result = mix(col, result, k);
-    
-    // ノイズ追加（サイズに応じて強度変化）
     float noiseAmt = mix(0.15, 0.05, sizeAnim);
     float noise = (hash11(fc.x + fc.y * 173.1 + stepB * 5.0) - 0.5) * noiseAmt * k;
     result += noise;
-    
     return clamp(result, 0.0, 1.0);
   }
-
-  // -----------------------
-  // Mode 3: WHITE NOISE (RGB independent color noise)
-  // -----------------------
   if (glitchMode == 3){
-    // RGB independent white noise (color) - beat locked
     float nr = hash11(fc.x + fc.y * 113.1 + stepB * 17.0 + seed * 101.7);
     float ng = hash11(fc.x + fc.y * 113.1 + stepB * 19.0 + seed * 107.3);
     float nb = hash11(fc.x + fc.y * 113.1 + stepB * 23.0 + seed * 109.1);
-    vec3 wn = vec3(nr, ng, nb);
-    // mix color noise with original
-    return clamp(mix(col, wn, 0.3 * k), 0.0, 1.0);
+    return clamp(mix(col, vec3(nr, ng, nb), 0.3 * k), 0.0, 1.0);
   }
-
-  // -----------------------
-  // Mode 4: LENS BLUR (強弱のついたレンズぼかし)
-  // -----------------------
   if (glitchMode == 4){
     vec2 center = resolution * 0.5;
     vec2 toCenter = fc - center;
     float dist = length(toCenter);
     float maxDist = length(resolution * 0.5);
     float distNorm = clamp(dist / max(maxDist, 1.0), 0.0, 1.0);
-    
-    // 中心から外側にかけて指数関数的にぼかしを強く
     float blurStrength = pow(distNorm, 2.5) * k;
-    
-    // ビートに合わせてパルス
     float beatPulse = 0.5 + 0.5 * sin(b * TAU);
     blurStrength *= (0.6 + 0.4 * beatPulse);
-    
-    // レンズ歪み効果（簡易版）
-    float distortAmt = blurStrength * 0.08;
-    vec2 dir = (length(toCenter) > 0.1) ? normalize(toCenter) : vec2(0.0);
-    float distortion = distNorm * distNorm * distortAmt;
-    
-    // 色収差（RGB分離）
     vec3 aberration = col;
-    float chromaAmt = blurStrength * 12.0;
-    
-    // 簡易的な色収差（ピクセルシフト）
     aberration.r = col.r * (1.0 - blurStrength * 0.1);
-    aberration.g = col.g;
     aberration.b = col.b * (1.0 + blurStrength * 0.1);
-    
-    // ビネット効果（周辺減光）
     float vignette = 1.0 - pow(distNorm, 3.0) * blurStrength * 0.6;
     aberration *= vignette;
-    
-    // 歪みとぼかしをミックス
-    vec3 result = mix(col, aberration, clamp(blurStrength * 2.0, 0.0, 1.0));
-    
-    return clamp(result, 0.0, 1.0);
+    return clamp(mix(col, aberration, clamp(blurStrength * 2.0, 0.0, 1.0)), 0.0, 1.0);
   }
-
   return col;
 }
 
 // =====================================================
-// main（短縮禁止：元の流れを維持）
+// main
 // =====================================================
 void main(){
   float bt = getBeat();
 
-  
-
-  // =========================
-  // 1) 背景は常に生成する
-  // =========================
   vec2 bgFC = gl_FragCoord.xy;
   
-  // カットアップグリッチ用のFC座標変更（背景にも適用）
   if(glitchMode == 1 && glitchAmt > 0.0){
     float b = glitchBeat;
     float stepB = floor(b * 16.0);
     float seed = fract(sin((stepB + 1.0) * 78.233 + glitchSeed * 11.7) * 12345.678);
-    
-    // ビート同期
     float beatPhase = fract(b);
     float beatActive = step(beatPhase, 0.25);
     float beatCurve = sin(min(beatPhase / 0.25, 1.0) * PI);
-    
     float k = clamp(glitchAmt, 0.0, 1.0);
     float globalTrigger = step(0.3, seed) * beatActive * k;
-    
     if(globalTrigger > 0.001){
-      vec2 screenUV = bgFC / resolution;
-      
-      // 極端なスライス高さ（2px〜600px、6乗）
       float sliceRandom = hash11(seed * 3.7);
       float sliceHeightPx = 2.0 + pow(sliceRandom, 6.0) * 598.0;
-      
       float pixelY = bgFC.y;
       float sid = floor(pixelY / sliceHeightPx);
       float r1 = hash11(sid * 13.37 + seed * 91.7);
-      
-      // 極端な選択性（7乗）
       float intensity = pow(r1, 7.0);
       float shouldGlitch = step(0.8, r1);
-      
       if(shouldGlitch > 0.5){
-        // 極端なシフト量（5乗）
         float shiftBase = pow(hash11(sid * 7.31 + seed * 19.1), 5.0);
         float shiftAmt = (shiftBase - 0.5) * 3.0 * intensity * beatCurve;
         float shiftAmt2 = (pow(hash11(sid * 29.3 + seed * 3.7), 3.0) - 0.5) * 0.8 * intensity;
         float beatShift = sin(b * TAU) * 0.3 * intensity * beatCurve;
         float randomShift = (pow(hash11(sid * 17.3 + seed * 5.3), 4.0) - 0.5) * 1.2 * intensity;
-        
         float totalShift = globalTrigger * (shiftAmt + shiftAmt2 + beatShift + randomShift);
-        
-        // bgFCのX座標をシフト
         bgFC.x = mod(bgFC.x + totalShift * resolution.x, resolution.x);
       }
     }
   }
   
-  // glitchMode=3,4,5用のFC座標変更（背景にも適用）
   if((glitchMode == 3 || glitchMode == 4 || glitchMode == 5) && glitchAmt > 0.0){
     vec2 screenUV = bgFC / resolution;
     vec2 transformedUV = applyGlitchUV_Multi(screenUV, bgFC);
     bgFC = transformedUV * resolution;
   }
-  
-  // FREEズームはsketch.jsでbgZoomに統合されるため、ここでは削除
-  // （各背景関数がbgZoomとbgCamPxを直接参照）
 
   vec3 bg = getBackground(bgFC);
-
-  // 背景の“呼吸”
   float cb = colorBeat(bt);
-  bg = mix(bg, palPick(fract(cb * 0.05)), 0.06);
+  bg = mix(bg, palPick(fract(cb * 0.05)), 0.00);
 
-  // =========================
-  // 2) showVisual 無効 → 背景のみ（キービジュアルなし）
-  // =========================
   if(showVisual == 0){
     vec3 finalBg = applyPaletteAll(bg, gl_FragCoord.xy);
     finalBg = applyGlitchAll(finalBg, gl_FragCoord.xy);
-    
-    // INVERT（独立して重ねがけ可能）
-    if(invertPalette != 0){
-      finalBg = vec3(1.0) - finalBg;
-    }
-    
+    if(invertPalette != 0){ finalBg = vec3(1.0) - finalBg; }
     gl_FragColor = vec4(finalBg, 1.0);
     return;
   }
 
-  // =========================
-  // 3) tex0（漫画・映像）
-  // =========================
   vec2 uv = uvCover(vTexCoord, resolution, texSize);
   if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0){
     vec3 finalBg = applyPaletteAll(bg, gl_FragCoord.xy);
     finalBg = applyGlitchAll(finalBg, gl_FragCoord.xy);
-    
-    // INVERT（独立して重ねがけ可能）
-    if(invertPalette != 0){
-      finalBg = vec3(1.0) - finalBg;
-    }
+    if(invertPalette != 0){ finalBg = vec3(1.0) - finalBg; }
     gl_FragColor = vec4(finalBg, 1.0);
     return;
   }
 
-  // カットアップグリッチ用のUV変更を適用
   uv = applyGlitchUV(uv, gl_FragCoord.xy);
-  
-  // その他のglitchMode用のUV変更を適用
   uv = applyGlitchUV_Multi(uv, gl_FragCoord.xy);
 
   vec3 src = texture2D(tex0, uv).rgb;
 
-  // =========================
-  // マゼンタキー
-  // =========================
   float rb = min(src.r, src.b);
   float magHard = step(keyRBMin, rb) * (1.0 - step(keyGMax, src.g));
   float magSoft = sstep(keyRBMin - keySoft, keyRBMin + keySoft, rb)
@@ -1273,15 +1280,9 @@ void main(){
   float mag = max(magHard, magSoft);
   float paperMask = 1.0 - mag;
 
-  // =========================
-  // 紙
-  // =========================
   vec3 paper = mix(bg, vec3(1.0), paperMask);
   paper = mix(paper, bg, 0.08);
 
-  // =========================
-  // 線画
-  // =========================
   float luma = dot(src, vec3(0.299, 0.587, 0.114));
   float ink = 1.0 - smoothstep(0.65, 0.95, luma);
   ink = pow(clamp(ink, 0.0, 1.0), baseInkGamma);
@@ -1298,9 +1299,6 @@ void main(){
     clamp(inkVis * inkOpacity * (1.0 + flashInk * flash), 0.0, 1.0)
   );
 
-  // =========================
-  // リング（既存）
-  // =========================
   vec2 n = gl_FragCoord.xy / resolution.xy;
   vec2 p = n - centerN;
   p.x *= resolution.x / resolution.y;
@@ -1323,19 +1321,14 @@ void main(){
               abs(wrapDelta(an,
                 fract(hash21(vec2(ringId, 3.7)) + sweepDir * easeOutQuint(phaseR)))));
 
-  float ringLine = smoothstep(lineW * mix(5.0, 20.0, hash21(vec2(ringId))),
-                              0.0, d0);
+  float ringLine = smoothstep(lineW * mix(5.0, 20.0, hash21(vec2(ringId))), 0.0, d0);
 
   float aLine = clamp(
-    sqrt(ringLine * arc * alive * inkVis)
-    * colorLineOpacity * (1.0 + flash),
+    sqrt(ringLine * arc * alive * inkVis) * colorLineOpacity * (1.0 + flash),
     0.0, 1.0
   );
   
-  // overlayOn が 0 ならリングを合成しない
-  if(overlayOn == 0){
-    aLine = 0.0;
-  }
+  if(overlayOn == 0){ aLine = 0.0; }
 
   vec3 ringCol = saturateColor(
     palPick(fract(hueBase + ringId * hueSpread + cb * 0.15)),
@@ -1348,11 +1341,7 @@ void main(){
 
   vec3 finalCol = applyPaletteAll(outCol, gl_FragCoord.xy);
   finalCol = applyGlitchAll(finalCol, gl_FragCoord.xy);
-  
-  // INVERT（独立して重ねがけ可能）
-  if(invertPalette != 0){
-    finalCol = vec3(1.0) - finalCol;
-  }
+  if(invertPalette != 0){ finalCol = vec3(1.0) - finalCol; }
   
   gl_FragColor = vec4(finalCol, 1.0);
 }
