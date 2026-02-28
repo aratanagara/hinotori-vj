@@ -1061,10 +1061,10 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
 
     // ---- 定数 ----
     float INNER_X = 80.0;  // 内枠 左右余白 px
-    float INNER_Y = 80.0;  // 内枠 上下余白 px
-    float SEP_X   = 5.0;  // コマ間 横余白 px（片側）
-    float SEP_Y   = 20.0;  // コマ間 縦余白 px（片側）
-    float BD      =  2;  // 枠線の太さ px
+    float INNER_Y = 60.0;  // 内枠 上下余白 px
+    float SEP_X   = 12.0;  // コマ間 横余白 px（片側）
+    float SEP_Y   = 16.0;  // コマ間 縦余白 px（片側）
+    float BD      =  1.5;  // 枠線の太さ px
 
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
     vec2 fMax  = vec2(1.0) - fMin;
@@ -1142,8 +1142,9 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     return col;
 }
 
-vec3 manga_renderPage(vec2 fc, vec2 innerUV, float xStart, float xW, float pageSeed,
-                      float timeIndex, float sceneProgress, float animDuration){
+vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
+                      float timeIndex, float sceneProgress, float animDuration,
+                      vec2 fMin, vec2 fMax){
     manga_initSeed(vec2(pageSeed, 99.1));
     float numRows = floor(manga_random()*2.0) + 2.0;
     float cols0 = floor(manga_random()*2.0) + 1.0;
@@ -1164,6 +1165,12 @@ vec3 manga_renderPage(vec2 fc, vec2 innerUV, float xStart, float xW, float pageS
     manga_initSeed3(vec3(panelId, pageSeed, 3.3));
     float isBleed = step(0.55, manga_random());
 
+    // 断ち切りでないコマ: 内枠外のピクセルは白
+    if(isBleed < 0.5){
+        if(uv.x < fMin.x || uv.x > fMax.x ||
+           uv.y < fMin.y || uv.y > fMax.y) return vec3(1.0);
+    }
+
     return manga_renderCell(fc, cell, panelId + pageSeed * 0.01,
                             timeIndex, sceneProgress, animDuration, isBleed);
 }
@@ -1183,7 +1190,9 @@ vec3 bg_manga(vec2 fc){
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
     vec2 fMax  = vec2(1.0) - fMin;
     vec2 fSize = fMax - fMin;
-    vec2 innerUV = (uv - fMin) / fSize;
+    // innerUVをクランプ: 内枠外のピクセルも端のコマに帰属させる
+    // （断ち切りコマなら画面端まで描画される）
+    vec2 innerUV = clamp((uv - fMin) / fSize, 0.0, 1.0);
 
     float gutterHalf = 8.0 / resolution.x;
 
@@ -1202,18 +1211,18 @@ vec3 bg_manga(vec2 fc){
         float igR = (gutterR - fMin.x) / fSize.x;
 
         if(uv.x < gutterL){
-            return manga_renderPage(fc, innerUV, 0.0, igL,
-                                    lSeed, timeIndex, sceneProgress, animDuration);
+            return manga_renderPage(fc, uv, innerUV, 0.0, igL,
+                                    lSeed, timeIndex, sceneProgress, animDuration, fMin, fMax);
         } else {
-            return manga_renderPage(fc, innerUV, igR, 1.0 - igR,
-                                    rSeed, timeIndex, sceneProgress, animDuration);
+            return manga_renderPage(fc, uv, innerUV, igR, 1.0 - igR,
+                                    rSeed, timeIndex, sceneProgress, animDuration, fMin, fMax);
         }
 
     } else {
         manga_initSeed(vec2(timeIndex, 55.3));
         float seed = manga_hash_f(timeIndex * 4.1 + 7.7);
-        return manga_renderPage(fc, innerUV, 0.0, 1.0,
-                                seed, timeIndex, sceneProgress, animDuration);
+        return manga_renderPage(fc, uv, innerUV, 0.0, 1.0,
+                                seed, timeIndex, sceneProgress, animDuration, fMin, fMax);
     }
 }
 
