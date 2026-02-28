@@ -954,68 +954,157 @@ void manga_initSeed3(vec3 v){manga_gSeed_f=manga_hash3_f(v);}
 float manga_random(){manga_gSeed_f=manga_hash_f(manga_gSeed_f+0.1);return fract(manga_gSeed_f);}
 float manga_easeOutQuint(float t){return 1.0-pow(1.0-t,5.0);}
 
-vec4 manga_applySubd(vec2 uv, float timeIndex){
-    vec2 cellId=vec2(0.0);
-    vec4 cell=vec4(0.0,0.0,1.0,1.0);
-    manga_initSeed(vec2(timeIndex,777.0));
-    float numSplits=2.0+floor(manga_random()*2.0);
-    for(int i=0;i<5;i++){
-        float fi=float(i);
-        if(fi>=numSplits) break;
-        manga_initSeed3(vec3(cellId,timeIndex));
-        float r=mix(0.40,0.60,manga_random());
-        bool splitHorizontal=manga_random()>0.5;
-        if(splitHorizontal){
-            float split=cell.x+cell.z*r;
-            if(uv.x>split){cell.x+=cell.z*r;cell.z*=1.0-r;cellId.x+=exp2(fi);}
-            else{cell.z*=r;}
-        }else{
-            float split=cell.y+cell.w*r;
-            if(uv.y>split){cell.y+=cell.w*r;cell.w*=1.0-r;cellId.y+=exp2(fi);}
-            else{cell.w*=r;}
-        }
-    }
-    return cell;
-}
+// ---- manga panel layout ----
+// コマをUV空間で管理 (x, y, w, h)
+// 最大8コマ、配列で保持
 
 vec3 bg_manga(vec2 fc){
-    vec2 uv=fc/resolution;
-    float sceneTime=2.0;
-    float animDuration=0.5;
-    float timeIndex=floor(time/sceneTime);
-    float sceneProgress=fract(time/sceneTime);
-    vec4 cell=manga_applySubd(uv,timeIndex);
-    vec2 cellId=floor(cell.xy*16.0);
-    manga_initSeed3(vec3(cellId,timeIndex));
-    float cellDelay=manga_random()*0.3;
-    float cellAnimProgress=clamp((sceneProgress-cellDelay)/animDuration,0.0,1.0);
-    float easedProgress=manga_easeOutQuint(cellAnimProgress);
-    float dirRand=manga_random();
+    vec2 uv = fc / resolution;
+    bool isWide = (resolution.x / resolution.y) > 1.15;
+
+    float sceneTime    = 3.0;
+    float animDuration = 0.45;
+    float timeIndex    = floor(time / sceneTime);
+    float sceneProgress= fract(time / sceneTime);
+
+    // パネル配列（最大8コマ）
+    vec4 panels[8];
+    int panelCount = 0;
+
+    manga_initSeed(vec2(timeIndex, 31.7));
+
+    if(isWide){
+        // ===== 見開きレイアウト =====
+        float cx = mix(0.47, 0.53, manga_random());
+        int lSplits = int(floor(manga_random()*3.0)) + 1; // 1〜3
+        int rSplits = int(floor(manga_random()*3.0)) + 1;
+
+        float lY = 0.0;
+        for(int i=0;i<3;i++){
+            if(i>=lSplits) break;
+            float h;
+            if(i==lSplits-1){ h=1.0-lY; }
+            else { float r=mix(0.28,0.55,manga_random()); h=(1.0-lY)*r; }
+            panels[panelCount] = vec4(0.0, lY, cx, h);
+            panelCount++;
+            lY += h;
+        }
+        float rY = 0.0;
+        for(int i=0;i<3;i++){
+            if(i>=rSplits) break;
+            float h;
+            if(i==rSplits-1){ h=1.0-rY; }
+            else { float r=mix(0.28,0.55,manga_random()); h=(1.0-rY)*r; }
+            panels[panelCount] = vec4(cx, rY, 1.0-cx, h);
+            panelCount++;
+            rY += h;
+        }
+    } else {
+        // ===== 縦長レイアウト =====
+        int cols = (manga_random() > 0.4) ? 2 : 1;
+
+        if(cols==1){
+            int rows = int(floor(manga_random()*3.0)) + 2; // 2〜4
+            float y = 0.0;
+            for(int i=0;i<4;i++){
+                if(i>=rows) break;
+                float h;
+                if(i==rows-1){ h=1.0-y; }
+                else { float r=mix(0.2,0.5,manga_random()); h=(1.0-y)*r; }
+                panels[panelCount] = vec4(0.0, y, 1.0, h);
+                panelCount++;
+                y += h;
+            }
+        } else {
+            float cx = mix(0.40, 0.60, manga_random());
+            int lRows = int(floor(manga_random()*2.0)) + 2; // 2〜3
+            int rRows = int(floor(manga_random()*2.0)) + 2;
+
+            float lY = 0.0;
+            for(int i=0;i<3;i++){
+                if(i>=lRows) break;
+                float h;
+                if(i==lRows-1){ h=1.0-lY; }
+                else { float r=mix(0.3,0.6,manga_random()); h=(1.0-lY)*r; }
+                panels[panelCount] = vec4(0.0, lY, cx, h);
+                panelCount++;
+                lY += h;
+            }
+            float rY = 0.0;
+            for(int i=0;i<3;i++){
+                if(i>=rRows) break;
+                float h;
+                if(i==rRows-1){ h=1.0-rY; }
+                else { float r=mix(0.3,0.6,manga_random()); h=(1.0-rY)*r; }
+                panels[panelCount] = vec4(cx, rY, 1.0-cx, h);
+                panelCount++;
+                rY += h;
+            }
+        }
+    }
+
+    // どのコマに属するか
+    int hitPanel = -1;
+    for(int i=0;i<8;i++){
+        if(i>=panelCount) break;
+        vec4 p = panels[i];
+        if(uv.x>=p.x && uv.x<=p.x+p.z && uv.y>=p.y && uv.y<=p.y+p.w){
+            hitPanel = i;
+            break;
+        }
+    }
+    if(hitPanel<0){ return vec3(1.0); }
+
+    vec4 cell = panels[hitPanel];
+
+    // アニメーション
+    manga_initSeed3(vec3(vec2(float(hitPanel), timeIndex), timeIndex));
+    float cellDelay = manga_random() * 0.3;
+    float cellAnimProgress = clamp((sceneProgress - cellDelay) / animDuration, 0.0, 1.0);
+    float easedProgress = manga_easeOutQuint(cellAnimProgress);
+    float dirRand = manga_random();
     vec2 slideDir;
-    if(dirRand<0.25)slideDir=vec2(-1.0,0.0);
-    else if(dirRand<0.5)slideDir=vec2(1.0,0.0);
-    else if(dirRand<0.75)slideDir=vec2(0.0,-1.0);
-    else slideDir=vec2(0.0,1.0);
-    vec2 slideOffset=slideDir*(1.0-easedProgress);
-    vec2 offsetPixels=slideOffset*resolution;
-    vec2 animatedPixelPos=fc-offsetPixels;
-    vec2 animatedUV=animatedPixelPos/resolution;
-    bool inCell=(animatedUV.x>=cell.x&&animatedUV.x<=cell.x+cell.z&&animatedUV.y>=cell.y&&animatedUV.y<=cell.y+cell.w);
-    if(!inCell){return vec3(1.0);}
-    vec2 cellUV=(animatedUV-cell.xy)/cell.zw;
-    vec3 col=manga_mainAgg(cellUV,manga_random(),time);
-    float marginX=5.0,marginY=20.0,borderPixels=5.0;
-    vec2 pixelPos=animatedPixelPos;
-    vec2 cellStart=cell.xy*resolution;
-    vec2 cellSize=cell.zw*resolution;
-    vec2 cellEnd=cellStart+cellSize;
-    float leftDist=pixelPos.x-cellStart.x;
-    float rightDist=cellEnd.x-pixelPos.x;
-    float topDist=pixelPos.y-cellStart.y;
-    float bottomDist=cellEnd.y-pixelPos.y;
-    bool inMargin=(leftDist<marginX||rightDist<marginX||topDist<marginY||bottomDist<marginY);
-    bool isBorder=!inMargin&&(leftDist<(marginX+borderPixels)||rightDist<(marginX+borderPixels)||topDist<(marginY+borderPixels)||bottomDist<(marginY+borderPixels));
-    if(inMargin){col=vec3(1.0);}else if(isBorder){col=vec3(0.0);}
+    if(dirRand<0.25)      slideDir=vec2(-1.0, 0.0);
+    else if(dirRand<0.5)  slideDir=vec2( 1.0, 0.0);
+    else if(dirRand<0.75) slideDir=vec2( 0.0,-1.0);
+    else                  slideDir=vec2( 0.0, 1.0);
+    vec2 animatedPixelPos = fc - slideDir*(1.0-easedProgress)*resolution;
+    vec2 animatedUV = animatedPixelPos / resolution;
+
+    bool inCell = (animatedUV.x>=cell.x && animatedUV.x<=cell.x+cell.z &&
+                   animatedUV.y>=cell.y && animatedUV.y<=cell.y+cell.w);
+    if(!inCell){ return vec3(1.0); }
+
+    vec2 cellUV = (animatedUV - cell.xy) / cell.zw;
+    manga_initSeed3(vec3(vec2(float(hitPanel), timeIndex), timeIndex+1.0));
+    vec3 col = manga_mainAgg(cellUV, manga_random(), time);
+
+    // コマ枠（断ち切り判定）
+    float MARGIN = 5.0;
+    float BORDER = 4.0;
+    vec2 pixelPos  = animatedPixelPos;
+    vec2 cellStart = cell.xy * resolution;
+    vec2 cellSize  = cell.zw * resolution;
+    vec2 cellEnd   = cellStart + cellSize;
+
+    float leftDist   = pixelPos.x - cellStart.x;
+    float rightDist  = cellEnd.x  - pixelPos.x;
+    float topDist    = pixelPos.y - cellStart.y;
+    float bottomDist = cellEnd.y  - pixelPos.y;
+
+    // 断ち切り：画面端に接するコマはそちら側の余白ゼロ
+    float mL = (cell.x      < 0.002) ? 0.0 : MARGIN;
+    float mR = (cell.x+cell.z > 0.998) ? 0.0 : MARGIN;
+    float mT = (cell.y      < 0.002) ? 0.0 : MARGIN;
+    float mB = (cell.y+cell.w > 0.998) ? 0.0 : MARGIN;
+
+    bool inMarginZone = (leftDist<mL || rightDist<mR || topDist<mT || bottomDist<mB);
+    bool isBorder = !inMarginZone &&
+                    (leftDist<(mL+BORDER) || rightDist<(mR+BORDER) ||
+                     topDist<(mT+BORDER)  || bottomDist<(mB+BORDER));
+
+    if(inMarginZone){ col=vec3(1.0); }
+    else if(isBorder){ col=vec3(0.0); }
     return col;
 }
 
