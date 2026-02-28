@@ -1143,8 +1143,11 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
 }
 
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
-                      float timeIndex, float sceneProgress, float animDuration,
-                      vec2 fMin, vec2 fMax){
+                      float timeIndex, float sceneProgress, float animDuration){
+    // 内枠パラメータ（manga_renderCellと同じ値）
+    vec2 pfMin = vec2(80.0, 60.0) / resolution;
+    vec2 pfMax = vec2(1.0) - pfMin;
+
     manga_initSeed(vec2(pageSeed, 99.1));
     float numRows = floor(manga_random()*2.0) + 2.0;
     float cols0 = floor(manga_random()*2.0) + 1.0;
@@ -1166,10 +1169,10 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     float isBleed = step(0.55, manga_random());
 
     // 断ち切りでないコマ: 内枠外のピクセルは白
-    if(isBleed < 0.5){
-        if(uv.x < fMin.x || uv.x > fMax.x ||
-           uv.y < fMin.y || uv.y > fMax.y) return vec3(1.0);
-    }
+    float outsideFrame = step(1.0, step(uv.x, pfMin.x) + step(pfMax.x, uv.x) +
+                                   step(uv.y, pfMin.y) + step(pfMax.y, uv.y));
+    float notBleed = 1.0 - isBleed;
+    if(notBleed * outsideFrame > 0.5) return vec3(1.0);
 
     return manga_renderCell(fc, cell, panelId + pageSeed * 0.01,
                             timeIndex, sceneProgress, animDuration, isBleed);
@@ -1212,17 +1215,17 @@ vec3 bg_manga(vec2 fc){
 
         if(uv.x < gutterL){
             return manga_renderPage(fc, uv, innerUV, 0.0, igL,
-                                    lSeed, timeIndex, sceneProgress, animDuration, fMin, fMax);
+                                    lSeed, timeIndex, sceneProgress, animDuration);
         } else {
             return manga_renderPage(fc, uv, innerUV, igR, 1.0 - igR,
-                                    rSeed, timeIndex, sceneProgress, animDuration, fMin, fMax);
+                                    rSeed, timeIndex, sceneProgress, animDuration);
         }
 
     } else {
         manga_initSeed(vec2(timeIndex, 55.3));
         float seed = manga_hash_f(timeIndex * 4.1 + 7.7);
         return manga_renderPage(fc, uv, innerUV, 0.0, 1.0,
-                                seed, timeIndex, sceneProgress, animDuration, fMin, fMax);
+                                seed, timeIndex, sceneProgress, animDuration);
     }
 }
 
