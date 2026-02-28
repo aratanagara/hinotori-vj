@@ -1092,7 +1092,7 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     float scrT = step(sMin.y, 0.002);
     float scrB = step(0.998, sMax.y);
 
-    vec2 uv = vec2(fc.x, resolution.y - fc.y) / resolution;
+    vec2 uv = fc / resolution;
 
     // アニメーション
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
@@ -1179,6 +1179,7 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
 }
 
 vec3 bg_manga(vec2 fc){
+    fc.y = resolution.y - fc.y;
     vec2 uv = fc / resolution;
     bool isWide = (resolution.x / resolution.y) > 1.15;
 
