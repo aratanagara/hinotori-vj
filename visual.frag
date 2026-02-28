@@ -1082,8 +1082,8 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
-    // 枠線（細め: MG=4, BD=2）
-    float MG = 4.0;
+    // 枠線（内枠20px: MG=20, BD=2）
+    float MG = 20.0;
     float BD = 2.0;
     vec2 cs = cell.xy * resolution;
     vec2 ce = cs + cell.zw * resolution;
