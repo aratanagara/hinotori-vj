@@ -1044,6 +1044,12 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     else if(dr<0.5)  slideDir=vec2( 1.0, 0.0);
     else if(dr<0.75) slideDir=vec2( 0.0,-1.0);
     else             slideDir=vec2( 0.0, 1.0);
+
+    // 断ち切りフラグ: 約40%の確率で断ち切りコマ
+    // 断ち切りの場合、画面端だけでなく全辺を断ち切り（内枠なし）
+    float bleedRand = manga_random();
+    float isBleed = step(0.60, bleedRand); // 0.0=通常(内枠あり), 1.0=断ち切り
+
     vec2 aPos = fc - slideDir*(1.0-ep)*resolution;
     vec2 aUV  = aPos / resolution;
 
@@ -1066,14 +1072,26 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     float rD = ce.x   - aPos.x;
     float tD = aPos.y - cs.y;
     float bD = ce.y   - aPos.y;
-    float mL = (cell.x           < 0.003) ? 0.0 : MG;
-    float mR = (cell.x + cell.z  > 0.997) ? 0.0 : MG;
-    float mT = (cell.y           < 0.003) ? 0.0 : MG;
-    float mB = (cell.y + cell.w  > 0.997) ? 0.0 : MG;
-    float bL = (mL < 0.5) ? 0.0 : BD;
-    float bR = (mR < 0.5) ? 0.0 : BD;
-    float bT = (mT < 0.5) ? 0.0 : BD;
-    float bB = (mB < 0.5) ? 0.0 : BD;
+
+    // 通常コマ: 画面端に接する辺も含めて全辺に余白+枠を描く（内枠コマ）
+    // 断ち切りコマ: 全辺の余白・枠をゼロ（isBleed=1.0）
+    //   ただし画面端に接しない辺（隣コマとの仕切り）は常にボーダーを描く
+    float atL = step(cell.x,           0.003);  // 1=画面左端
+    float atR = step(0.997, cell.x+cell.z);     // 1=画面右端
+    float atT = step(cell.y,           0.003);  // 1=画面上端
+    float atB = step(0.997, cell.y+cell.w);     // 1=画面下端
+
+    // 余白: 断ち切りかつ画面端 → 0, それ以外 → MG
+    float mL = MG * (1.0 - isBleed * atL);
+    float mR = MG * (1.0 - isBleed * atR);
+    float mT = MG * (1.0 - isBleed * atT);
+    float mB = MG * (1.0 - isBleed * atB);
+    // ボーダー: 断ち切りかつ画面端 → 0, それ以外 → BD
+    float bL = BD * (1.0 - isBleed * atL);
+    float bR = BD * (1.0 - isBleed * atR);
+    float bT = BD * (1.0 - isBleed * atT);
+    float bB = BD * (1.0 - isBleed * atB);
+
     bool inMg = (lD<mL || rD<mR || tD<mT || bD<mB);
     bool isBd = !inMg && (lD<mL+bL || rD<mR+bR || tD<mT+bT || bD<mB+bB);
     if(inMg) col=vec3(1.0);
