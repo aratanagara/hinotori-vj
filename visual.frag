@@ -1094,20 +1094,34 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
 
     vec2 uv = fc / resolution;
 
-    // アニメーション
+    // アニメーション: コマごとにランダムで3種類から選択
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
     float cellDelay = manga_random() * 0.25;
     float prog = clamp((sceneProgress - cellDelay) / animDuration, 0.0, 1.0);
     float ep   = manga_easeOutQuint(prog);
-    float dr   = manga_random();
-    vec2 slideDir;
-    if(dr < 0.25)      slideDir = vec2(-1.0,  0.0);
-    else if(dr < 0.5)  slideDir = vec2( 1.0,  0.0);
-    else if(dr < 0.75) slideDir = vec2( 0.0, -1.0);
-    else               slideDir = vec2( 0.0,  1.0);
+    float animType = floor(manga_random() * 3.0); // 0=フェードイン 1=スライドイン 2=ポップアップ
 
-    vec2 aUV  = uv - slideDir * (1.0 - ep);
-    vec2 aPos = aUV * resolution;
+    float fadeAlpha = 1.0;
+    vec2 aUV = uv;
+
+    if(animType < 0.5) {
+        // フェードイン
+        fadeAlpha = ep;
+    } else if(animType < 1.5) {
+        // スライドイン（4方向ランダム）
+        float dr = manga_random();
+        vec2 slideDir;
+        if(dr < 0.25)      slideDir = vec2(-1.0,  0.0);
+        else if(dr < 0.5)  slideDir = vec2( 1.0,  0.0);
+        else if(dr < 0.75) slideDir = vec2( 0.0, -1.0);
+        else               slideDir = vec2( 0.0,  1.0);
+        aUV = uv - slideDir * (1.0 - ep);
+    } else {
+        // ポップアップ（コマ中心からスケール拡大）
+        vec2 center = (sMin + sMax) * 0.5;
+        float scale = mix(0.05, 1.0, ep);
+        aUV = (uv - center) / max(scale, 0.001) + center;
+    }
 
     if(aUV.x < sMin.x || aUV.x > sMax.x ||
        aUV.y < sMin.y || aUV.y > sMax.y){
@@ -1118,21 +1132,21 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
-    // 枠描画: gl_FragCoord.xy を直接使用
-    // sMin.y/sMax.yはY=0が上の設計なのでgl_FragCoord(Y=0が下)と変換
+    // 枠描画: gl_FragCoord.xy を直接使用、Y軸を明示的に変換
+    // sMin.y/sMax.yはY=0が上の設計、gl_FragCoord.yはY=0が下
     vec2 px = gl_FragCoord.xy;
-    float pxL =        sMin.x * resolution.x;
-    float pxR =        sMax.x * resolution.x;
-    float pxBtm = (1.0 - sMax.y) * resolution.y;  // sMax.y大=上→gl_FragCoordでは下
-    float pxTop = (1.0 - sMin.y) * resolution.y;  // sMin.y小=上→gl_FragCoordでは大
+    float pxL   =        sMin.x * resolution.x;
+    float pxR   =        sMax.x * resolution.x;
+    float pxBtm = (1.0 - sMax.y) * resolution.y;  // UV下端→gl_FragCoord底
+    float pxTop = (1.0 - sMin.y) * resolution.y;  // UV上端→gl_FragCoord頂
 
     float dL   = px.x - pxL;
     float dR   = pxR  - px.x;
-    float dBtm = px.y - pxBtm;  // 画面下辺からの距離
-    float dTop = pxTop - px.y;  // 画面上辺からの距離
+    float dBtm = px.y - pxBtm;
+    float dTop = pxTop - px.y;
 
-    // scrT: sMin.y≈0 = UV上端 = 上端断ち切り → 上辺(dTop)の枠なし
-    // scrB: sMax.y≈1 = UV下端 = 下端断ち切り → 下辺(dBtm)の枠なし
+    // scrT: sMin.y≈0=UV上端断ち切り → 上辺(dTop)の枠なし
+    // scrB: sMax.y≈1=UV下端断ち切り → 下辺(dBtm)の枠なし
     float mL   = SEP_X * (1.0 - scrL);
     float mR   = SEP_X * (1.0 - scrR);
     float mTop = SEP_Y * (1.0 - scrT);
@@ -1146,7 +1160,8 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     bool isBd = !inMg && (dL<mL+bL || dR<mR+bR || dTop<mTop+bTop || dBtm<mBtm+bBtm);
     if(inMg)      col = vec3(1.0);
     else if(isBd) col = vec3(0.0);
-    return col;
+
+    return mix(vec3(1.0), col, fadeAlpha);
 }
 
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
