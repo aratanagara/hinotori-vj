@@ -1264,10 +1264,28 @@ vec3 getBackground(vec2 fc){
   if(bgMode==9){
     vec2 uv = fc / resolution;
     float z = max(0.001, bgZoom);
+
+    // bgCamPx is in pixels of the photo buffer; convert to UV offset
     vec2 cam = bgCamPx / max(bgPhotoSize, vec2(1.0));
+
+    // camera + zoom
     vec2 suv = (uv - 0.5) / z + 0.5 + cam;
-    suv = fract(suv);
+
+    // IMPORTANT:
+    // Do NOT use fract() here. It makes the texture wrap and causes the "frame margin"
+    // to disappear in one direction when the camera crosses the 0..1 boundary.
+    // Instead, treat out-of-range as paper (white).
+    bool outX = (suv.x < 0.0) || (suv.x > 1.0);
+    bool outY = (suv.y < 0.0) || (suv.y > 1.0);
+    if(outX || outY) return vec3(1.0);
+
+    // p5 texture coordinate flip (Y)
     suv.y = 1.0 - suv.y;
+
+    // Avoid sampling exactly on the edge to prevent border artifacts on some GPUs/browsers
+    vec2 texel = 1.0 / max(bgPhotoSize, vec2(1.0));
+    suv = clamp(suv, texel * 0.5, vec2(1.0) - texel * 0.5);
+
     return texture2D(bgPhoto, suv).rgb;
   }
   return bg_vangogh(fc);
