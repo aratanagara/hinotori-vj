@@ -1092,41 +1092,22 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     float scrT = step(sMin.y, 0.002);
     float scrB = step(0.998, sMax.y);
 
-    // gl_FragCoord.yはY=0が画面下、sMin/sMaxはY=0が上なので反転
-    vec2 uv = vec2(fc.x, resolution.y - fc.y) / resolution;
+    vec2 uv = fc / resolution;
 
-    // アニメーション: 0=フェードイン 1=スライドイン 2=ポップアップ からランダム選択
+    // アニメーション
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
     float cellDelay = manga_random() * 0.25;
     float prog = clamp((sceneProgress - cellDelay) / animDuration, 0.0, 1.0);
     float ep   = manga_easeOutQuint(prog);
-    float animType = floor(manga_random() * 3.0);
+    float dr   = manga_random();
+    vec2 slideDir;
+    if(dr < 0.25)      slideDir = vec2(-1.0,  0.0);
+    else if(dr < 0.5)  slideDir = vec2( 1.0,  0.0);
+    else if(dr < 0.75) slideDir = vec2( 0.0, -1.0);
+    else               slideDir = vec2( 0.0,  1.0);
 
-    float fadeAlpha = 1.0;
-    vec2 aUV = uv;
-
-    if(animType < 0.5) {
-        // フェードイン
-        fadeAlpha = ep;
-    } else if(animType < 1.5) {
-        // スライドイン（4方向ランダム）
-        float dr = manga_random();
-        vec2 slideDir;
-        if(dr < 0.25)      slideDir = vec2(-1.0,  0.0);
-        else if(dr < 0.5)  slideDir = vec2( 1.0,  0.0);
-        else if(dr < 0.75) slideDir = vec2( 0.0, -1.0);
-        else               slideDir = vec2( 0.0,  1.0);
-        aUV = uv - slideDir * (1.0 - ep);
-    } else {
-        // ポップアップ（コマ中心からスケール拡大）
-        vec2 center = (sMin + sMax) * 0.5;
-        float scale = mix(0.05, 1.0, ep);
-        aUV = (uv - center) / max(scale, 0.001) + center;
-    }
-
-    // aUVはY=0が上の座標系なのでそのままsMin/sMaxと比較できる
-    float aPosX = aUV.x * resolution.x;
-    float aPosY = aUV.y * resolution.y;  // Y=0が上のピクセル座標
+    vec2 aUV  = uv - slideDir * (1.0 - ep);
+    vec2 aPos = aUV * resolution;
 
     if(aUV.x < sMin.x || aUV.x > sMax.x ||
        aUV.y < sMin.y || aUV.y > sMax.y){
@@ -1138,26 +1119,29 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
     // 枠描画: 断ち切り辺(scr=1)は余白・枠ゼロ、それ以外はSEP+BD
-    float lD = aPosX - sMin.x * resolution.x;
-    float rD = sMax.x * resolution.x - aPosX;
-    float tD = aPosY - sMin.y * resolution.y;
-    float bD = sMax.y * resolution.y - aPosY;
+    vec2 csP = sMin * resolution;
+    vec2 ceP = sMax * resolution;
+    float lD = aPos.x - csP.x;
+    float rD = ceP.x  - aPos.x;
+    float tD = aPos.y - csP.y;
+    float bD = ceP.y  - aPos.y;
 
+    // tD=sMin側(Y=0が下なので実際は下辺距離)→scrBで制御
+    // bD=sMax側(実際は上辺距離)→scrTで制御
     float mL = SEP_X * (1.0 - scrL);
     float mR = SEP_X * (1.0 - scrR);
-    float mT = SEP_Y * (1.0 - scrT);
-    float mB = SEP_Y * (1.0 - scrB);
+    float mT = SEP_Y * (1.0 - scrB);
+    float mB = SEP_Y * (1.0 - scrT);
     float bL = BD    * (1.0 - scrL);
     float bR = BD    * (1.0 - scrR);
-    float bT = BD    * (1.0 - scrT);
-    float bB = BD    * (1.0 - scrB);
+    float bT = BD    * (1.0 - scrB);
+    float bB = BD    * (1.0 - scrT);
 
     bool inMg = (lD<mL || rD<mR || tD<mT || bD<mB);
     bool isBd = !inMg && (lD<mL+bL || rD<mR+bR || tD<mT+bT || bD<mB+bB);
     if(inMg)      col = vec3(1.0);
     else if(isBd) col = vec3(0.0);
-
-    return mix(vec3(1.0), col, fadeAlpha);
+    return col;
 }
 
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
@@ -1186,10 +1170,9 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     manga_initSeed3(vec3(panelId, pageSeed, 3.3));
     float isBleed = step(0.55, manga_random());
 
-    // 断ち切りでないコマ: 内枠外のピクセルは白（uvはY=0が下なのでY判定を反転）
-    float uvYflip = 1.0 - uv.y;
+    // 断ち切りでないコマ: 内枠外のピクセルは白
     float outsideFrame = step(1.0, step(uv.x, pfMin.x) + step(pfMax.x, uv.x) +
-                                   step(uvYflip, pfMin.y) + step(pfMax.y, uvYflip));
+                                   step(uv.y, pfMin.y) + step(pfMax.y, uv.y));
     float notBleed = 1.0 - isBleed;
     if(notBleed * outsideFrame > 0.5) return vec3(1.0);
 
@@ -1198,7 +1181,8 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
 }
 
 vec3 bg_manga(vec2 fc){
-    vec2 uv = vec2(fc.x, resolution.y - fc.y) / resolution;
+    fc.y = resolution.y - fc.y;
+    vec2 uv = fc / resolution;
     bool isWide = (resolution.x / resolution.y) > 1.15;
 
     float sceneTime    = 3.5;
