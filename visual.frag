@@ -1086,6 +1086,12 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     sMin.y = mix(sMin.y, 0.0, isBleed * atT);
     sMax.y = mix(sMax.y, 1.0, isBleed * atB);
 
+    // 非断ち切りコマ: 内枠（fMin〜fMax）内にクランプ
+    sMin.x = mix(max(sMin.x, fMin.x), sMin.x, isBleed);
+    sMax.x = mix(min(sMax.x, fMax.x), sMax.x, isBleed);
+    sMin.y = mix(max(sMin.y, fMin.y), sMin.y, isBleed);
+    sMax.y = mix(min(sMax.y, fMax.y), sMax.y, isBleed);
+
     // 実際に画面端に到達しているか（断ち切り後）
     float scrL = step(sMin.x, 0.002);
     float scrR = step(0.998, sMax.x);
@@ -1155,10 +1161,6 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
 
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
                       float timeIndex, float sceneProgress, float animDuration){
-    // 内枠パラメータ（manga_renderCellと同じ値）
-    vec2 pfMin = vec2(80.0, 80.0) / resolution;
-    vec2 pfMax = vec2(1.0) - pfMin;
-
     manga_initSeed(vec2(pageSeed, 99.1));
     float numRows = floor(manga_random()*2.0) + 2.0;
     float cols0 = floor(manga_random()*2.0) + 1.0;
@@ -1178,16 +1180,6 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     // 断ち切りフラグ（約45%）
     manga_initSeed3(vec3(panelId, pageSeed, 3.3));
     float isBleed = step(0.55, manga_random());
-
-    // 断ち切りでないコマ: 内枠外のピクセルは白
-    // outsideFrame=1: pfMin/pfMax の外側にいる
-    float oL = step(uv.x, pfMin.x - 0.001);  // x < pfMin.x
-    float oR = step(pfMax.x + 0.001, uv.x);  // x > pfMax.x
-    float oT = step(uv.y, pfMin.y - 0.001);  // y < pfMin.y
-    float oB = step(pfMax.y + 0.001, uv.y);  // y > pfMax.y
-    float outsideFrame = clamp(oL + oR + oT + oB, 0.0, 1.0);
-    float notBleed = 1.0 - isBleed;
-    if(notBleed * outsideFrame > 0.5) return vec3(1.0);
 
     return manga_renderCell(fc, cell, panelId + pageSeed * 0.01,
                             timeIndex, sceneProgress, animDuration, isBleed);
