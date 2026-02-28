@@ -1092,10 +1092,10 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     float scrT = step(sMin.y, 0.002);
     float scrB = step(0.998, sMax.y);
 
-    // gl_FragCoord.yはY=0が下、sMin/sMaxはY=0が上なので反転
+    // gl_FragCoord.yはY=0が画面下、sMin/sMaxはY=0が上なので反転
     vec2 uv = vec2(fc.x, resolution.y - fc.y) / resolution;
 
-    // アニメーション種別をランダム選択: 0=フェードイン 1=スライドイン 2=ポップアップ
+    // アニメーション: 0=フェードイン 1=スライドイン 2=ポップアップ からランダム選択
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
     float cellDelay = manga_random() * 0.25;
     float prog = clamp((sceneProgress - cellDelay) / animDuration, 0.0, 1.0);
@@ -1124,8 +1124,9 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
         aUV = (uv - center) / max(scale, 0.001) + center;
     }
 
-    // aUVはY=0が上の座標系なのでaPos.yもY=0が上
-    vec2 aPos = aUV * resolution;
+    // aUVはY=0が上の座標系なのでそのままsMin/sMaxと比較できる
+    float aPosX = aUV.x * resolution.x;
+    float aPosY = aUV.y * resolution.y;  // Y=0が上のピクセル座標
 
     if(aUV.x < sMin.x || aUV.x > sMax.x ||
        aUV.y < sMin.y || aUV.y > sMax.y){
@@ -1136,12 +1137,11 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
-    // 枠描画: csP/cePもY=0が上の座標系で計算
-    // sMin.yが上端、sMax.yが下端なので、ピクセル座標に変換するときY軸を合わせる
-    float lD = aPos.x - sMin.x * resolution.x;
-    float rD = sMax.x * resolution.x - aPos.x;
-    float tD = aPos.y - sMin.y * resolution.y;
-    float bD = sMax.y * resolution.y - aPos.y;
+    // 枠描画: 断ち切り辺(scr=1)は余白・枠ゼロ、それ以外はSEP+BD
+    float lD = aPosX - sMin.x * resolution.x;
+    float rD = sMax.x * resolution.x - aPosX;
+    float tD = aPosY - sMin.y * resolution.y;
+    float bD = sMax.y * resolution.y - aPosY;
 
     float mL = SEP_X * (1.0 - scrL);
     float mR = SEP_X * (1.0 - scrR);
@@ -1186,10 +1186,10 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     manga_initSeed3(vec3(panelId, pageSeed, 3.3));
     float isBleed = step(0.55, manga_random());
 
-    // 断ち切りでないコマ: 内枠外のピクセルは白（uv.yはY=0が下なので反転）
-    vec2 uvF = vec2(uv.x, 1.0 - uv.y);
-    float outsideFrame = step(1.0, step(uvF.x, pfMin.x) + step(pfMax.x, uvF.x) +
-                                   step(uvF.y, pfMin.y) + step(pfMax.y, uvF.y));
+    // 断ち切りでないコマ: 内枠外のピクセルは白（uvはY=0が下なのでY判定を反転）
+    float uvYflip = 1.0 - uv.y;
+    float outsideFrame = step(1.0, step(uv.x, pfMin.x) + step(pfMax.x, uv.x) +
+                                   step(uvYflip, pfMin.y) + step(pfMax.y, uvYflip));
     float notBleed = 1.0 - isBleed;
     if(notBleed * outsideFrame > 0.5) return vec3(1.0);
 
