@@ -1100,16 +1100,12 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     float outsideL = step(uv.x + 0.001, fMin.x);
     float outsideR = step(fMax.x, uv.x - 0.001);
     float outsideFrame = clamp(outsideL + outsideR + outsideT + outsideB, 0.0, 1.0);
-    // 内枠外のピクセルは断ち切りコマのみ（非断ち切りは sMin/sMax クランプ済みで届かない）
-    // → アニメーションを適用しない（常に ep=1 として扱う）
 
-    // アニメーション
+    // アニメーション（内枠内外ともに同じepを使う）
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
     float cellDelay = manga_random() * 0.25;
     float prog = clamp((sceneProgress - cellDelay) / animDuration, 0.0, 1.0);
     float ep   = manga_easeOutQuint(prog);
-    // 内枠外エリアはアニメーションなし（ep=1固定）
-    ep = mix(ep, 1.0, outsideFrame);
     float dr   = manga_random();
     vec2 slideDir;
     if(dr < 0.25)      slideDir = vec2(-1.0,  0.0);
@@ -1120,10 +1116,16 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     vec2 aUV  = uv - slideDir * (1.0 - ep);
     vec2 aPos = aUV * resolution;
 
-    if(aUV.x < sMin.x || aUV.x > sMax.x ||
-       aUV.y < sMin.y || aUV.y > sMax.y){
-        return vec3(1.0);
-    }
+    // 内枠内ピクセル: コマ範囲チェックあり
+    // 内枠外ピクセル（断ち切り拡張エリア）: コマ範囲チェックをスキップし
+    //   代わりに aUV をコマ内にクランプしてコンテンツをサンプリング
+    float inBounds = step(sMin.x, aUV.x) * step(aUV.x, sMax.x) *
+                     step(sMin.y, aUV.y) * step(aUV.y, sMax.y);
+    if(inBounds < 0.5 && outsideFrame < 0.5) return vec3(1.0);
+
+    // 内枠外では aUV をコマ端にクランプ（コンテンツを引き伸ばして埋める）
+    aUV = mix(aUV, clamp(aUV, sMin, sMax), outsideFrame);
+    aPos = aUV * resolution;
 
     vec2 cellUV = (aUV - sMin) / (sMax - sMin);
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
