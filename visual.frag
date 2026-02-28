@@ -1060,11 +1060,11 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     // isBleed=1 のとき画面端まで拡張
 
     // 内枠パラメータ（ピクセル）
-    float INNER_X = 60.0;
-    float INNER_Y = 60.0;
+    float INNER_X = 100.0;
+    float INNER_Y = 100.0;
     float BD      =   2.0;
-    float SEP_X   =  5.0;
-    float SEP_Y   =  15.0;
+    float SEP_X   =  4.0;
+    float SEP_Y   =  20.0;
 
     // 内枠の画面UV座標
     vec2 frameUVMin = vec2(INNER_X, INNER_Y) / resolution;
