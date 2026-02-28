@@ -1060,10 +1060,10 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     // isBleed=1: 内枠外周辺を画面端まで拡張（断ち切り）
 
     // ---- 定数 ----
-    float INNER_X = 80.0;  // 内枠 左右余白 px（bg_mangaと統一）
-    float INNER_Y = 80.0;  // 内枠 上下余白 px（bg_mangaと統一）
-    float SEP_X   =  6.0;  // コマ間 横余白 px（片側）
-    float SEP_Y   = 24.0;  // コマ間 縦余白 px（片側）
+    float INNER_X = 60.0;  // 内枠 左右余白 px
+    float INNER_Y = 60.0;  // 内枠 上下余白 px
+    float SEP_X   =  6.0;  // コマ間 横余白 px（片側）→ 視覚的間隔: SEP_X*2+BD*2
+    float SEP_Y   = 24.0;  // コマ間 縦余白 px（片側）→ 視覚的間隔: SEP_Y*2+BD*2
     float BD      =  3.0;  // 枠線の太さ px
 
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
@@ -1118,25 +1118,32 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
-    // 枠描画: 断ち切り辺(scr=1)は余白・枠ゼロ、それ以外はSEP+BD
-    vec2 csP = sMin * resolution;
-    vec2 ceP = sMax * resolution;
-    float lD = aPos.x - csP.x;
-    float rD = ceP.x  - aPos.x;
-    float tD = aPos.y - csP.y;
-    float bD = ceP.y  - aPos.y;
+    // 枠描画: gl_FragCoord.xy を直接使用
+    // sMin.y/sMax.yはY=0が上の設計なのでgl_FragCoord(Y=0が下)と変換
+    vec2 px = gl_FragCoord.xy;
+    float pxL =        sMin.x * resolution.x;
+    float pxR =        sMax.x * resolution.x;
+    float pxBtm = (1.0 - sMax.y) * resolution.y;  // sMax.y大=上→gl_FragCoordでは下
+    float pxTop = (1.0 - sMin.y) * resolution.y;  // sMin.y小=上→gl_FragCoordでは大
 
-    float mL = SEP_X * (1.0 - scrL);
-    float mR = SEP_X * (1.0 - scrR);
-    float mT = SEP_Y * (1.0 - scrT);
-    float mB = SEP_Y * (1.0 - scrB);
-    float bL = BD    * (1.0 - scrL);
-    float bR = BD    * (1.0 - scrR);
-    float bT = BD    * (1.0 - scrT);
-    float bB = BD    * (1.0 - scrB);
+    float dL   = px.x - pxL;
+    float dR   = pxR  - px.x;
+    float dBtm = px.y - pxBtm;  // 画面下辺からの距離
+    float dTop = pxTop - px.y;  // 画面上辺からの距離
 
-    bool inMg = (lD<mL || rD<mR || tD<mT || bD<mB);
-    bool isBd = !inMg && (lD<mL+bL || rD<mR+bR || tD<mT+bT || bD<mB+bB);
+    // scrT: sMin.y≈0 = UV上端 = 上端断ち切り → 上辺(dTop)の枠なし
+    // scrB: sMax.y≈1 = UV下端 = 下端断ち切り → 下辺(dBtm)の枠なし
+    float mL   = SEP_X * (1.0 - scrL);
+    float mR   = SEP_X * (1.0 - scrR);
+    float mTop = SEP_Y * (1.0 - scrT);
+    float mBtm = SEP_Y * (1.0 - scrB);
+    float bL   = BD    * (1.0 - scrL);
+    float bR   = BD    * (1.0 - scrR);
+    float bTop = BD    * (1.0 - scrT);
+    float bBtm = BD    * (1.0 - scrB);
+
+    bool inMg = (dL<mL || dR<mR || dTop<mTop || dBtm<mBtm);
+    bool isBd = !inMg && (dL<mL+bL || dR<mR+bR || dTop<mTop+bTop || dBtm<mBtm+bBtm);
     if(inMg)      col = vec3(1.0);
     else if(isBd) col = vec3(0.0);
     return col;
