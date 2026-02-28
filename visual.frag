@@ -954,9 +954,132 @@ void manga_initSeed3(vec3 v){manga_gSeed_f=manga_hash3_f(v);}
 float manga_random(){manga_gSeed_f=manga_hash_f(manga_gSeed_f+0.1);return fract(manga_gSeed_f);}
 float manga_easeOutQuint(float t){return 1.0-pow(1.0-t,5.0);}
 
-// ---- manga panel layout ----
-// コマをUV空間で管理 (x, y, w, h)
-// 最大8コマ、配列で保持
+// ---- manga panel layout (GLSL ES 1.00 compatible) ----
+// 配列・動的インデックス不使用。コマUVをシードから決定論的に計算する
+// コマのUV rect (x,y,w,h) をシードから再現性よく計算するヘルパー
+// splits: 1,2,3  idx: 0〜splits-1
+// 戻り値: vec2(y開始, 高さ) in UV
+vec2 manga_rowBand(float idx, float splits, float seed0){
+    // splits個のバンドをランダム比率で分割
+    // 各バンドの比率を計算（正規化済み）
+    float r0 = mix(0.25,0.55, manga_hash_f(seed0 + 0.0));
+    float r1 = mix(0.25,0.55, manga_hash_f(seed0 + 1.0));
+    float r2 = mix(0.25,0.55, manga_hash_f(seed0 + 2.0));
+    // 使用するバンド数に合わせて正規化
+    float y0, h0, y1, h1, y2, h2;
+    if(splits < 1.5){
+        // 1段: 全体
+        y0=0.0; h0=1.0;
+        y1=0.0; h1=0.0;
+        y2=0.0; h2=0.0;
+    } else if(splits < 2.5){
+        // 2段
+        float ra = r0 / (r0+r1);
+        y0=0.0;  h0=ra;
+        y1=ra;   h1=1.0-ra;
+        y2=0.0;  h2=0.0;
+    } else {
+        // 3段
+        float s = r0+r1+r2;
+        y0=0.0;          h0=r0/s;
+        y1=r0/s;         h1=r1/s;
+        y2=(r0+r1)/s;    h2=r2/s;
+    }
+    // idx番目のバンドを返す
+    vec2 band = vec2(y0, h0);
+    if(idx > 0.5) band = vec2(y1, h1);
+    if(idx > 1.5) band = vec2(y2, h2);
+    return band;
+}
+
+// パネルIDからcell rect (x,y,w,h in UV) を返す（GLSL ES 1.00対応）
+// panelId: 0〜7  isWide, timeIndex, gutterL, gutterR から決定論的に計算
+vec4 manga_getCell(float panelId, float gutterL, float gutterR,
+                   float lSplits, float rSplits,
+                   float lSeed, float rSeed){
+    // 左ページ: panelId 0〜(lSplits-1)
+    // 右ページ: panelId lSplits〜(lSplits+rSplits-1)
+    float isRight = step(lSplits - 0.5, panelId);
+    float rowIdx  = panelId - isRight * lSplits;
+    float splits  = mix(lSplits, rSplits, isRight);
+    float seed    = mix(lSeed,   rSeed,   isRight);
+    float xStart  = mix(0.0,  gutterR, isRight);
+    float xWidth  = mix(gutterL, 1.0-gutterR, isRight);
+
+    vec2 band = manga_rowBand(rowIdx, splits, seed);
+    return vec4(xStart, band.x, xWidth, band.y);
+}
+
+// 縦長レイアウト用: 1列
+vec4 manga_getCellPortrait1(float panelId, float rows, float seed){
+    vec2 band = manga_rowBand(panelId, rows, seed);
+    return vec4(0.0, band.x, 1.0, band.y);
+}
+
+// 縦長レイアウト用: 2列
+vec4 manga_getCellPortrait2(float panelId, float cx,
+                             float lRows, float rRows,
+                             float lSeed, float rSeed){
+    float isRight = step(lRows - 0.5, panelId);
+    float rowIdx  = panelId - isRight * lRows;
+    float rows    = mix(lRows, rRows, isRight);
+    float seed    = mix(lSeed, rSeed, isRight);
+    float xStart  = mix(0.0, cx, isRight);
+    float xWidth  = mix(cx, 1.0-cx, isRight);
+    vec2 band = manga_rowBand(rowIdx, rows, seed);
+    return vec4(xStart, band.x, xWidth, band.y);
+}
+
+vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
+                      float sceneProgress, float animDuration){
+    vec2 uv = fc / resolution;
+    // アニメーション
+    manga_initSeed3(vec3(panelId, timeIndex, 7.7));
+    float cellDelay = manga_random() * 0.3;
+    float prog = clamp((sceneProgress - cellDelay) / animDuration, 0.0, 1.0);
+    float ep = manga_easeOutQuint(prog);
+    float dr = manga_random();
+    vec2 slideDir;
+    if(dr<0.25)      slideDir=vec2(-1.0, 0.0);
+    else if(dr<0.5)  slideDir=vec2( 1.0, 0.0);
+    else if(dr<0.75) slideDir=vec2( 0.0,-1.0);
+    else             slideDir=vec2( 0.0, 1.0);
+    vec2 aPos = fc - slideDir*(1.0-ep)*resolution;
+    vec2 aUV  = aPos / resolution;
+
+    // コマ内チェック
+    if(aUV.x < cell.x || aUV.x > cell.x+cell.z ||
+       aUV.y < cell.y || aUV.y > cell.y+cell.w){
+        return vec3(1.0);
+    }
+
+    vec2 cellUV = (aUV - cell.xy) / cell.zw;
+    manga_initSeed3(vec3(panelId, timeIndex, 13.3));
+    vec3 col = manga_mainAgg(cellUV, manga_random(), time);
+
+    // 枠・断ち切り
+    float MG = 6.0;
+    float BD = 4.0;
+    vec2 cs = cell.xy * resolution;
+    vec2 ce = cs + cell.zw * resolution;
+    float lD = aPos.x - cs.x;
+    float rD = ce.x   - aPos.x;
+    float tD = aPos.y - cs.y;
+    float bD = ce.y   - aPos.y;
+    float mL = (cell.x           < 0.003) ? 0.0 : MG;
+    float mR = (cell.x + cell.z  > 0.997) ? 0.0 : MG;
+    float mT = (cell.y           < 0.003) ? 0.0 : MG;
+    float mB = (cell.y + cell.w  > 0.997) ? 0.0 : MG;
+    float bL = (mL < 0.5) ? 0.0 : BD;
+    float bR = (mR < 0.5) ? 0.0 : BD;
+    float bT = (mT < 0.5) ? 0.0 : BD;
+    float bB = (mB < 0.5) ? 0.0 : BD;
+    bool inMg = (lD<mL || rD<mR || tD<mT || bD<mB);
+    bool isBd = !inMg && (lD<mL+bL || rD<mR+bR || tD<mT+bT || bD<mB+bB);
+    if(inMg) col=vec3(1.0);
+    else if(isBd) col=vec3(0.0);
+    return col;
+}
 
 vec3 bg_manga(vec2 fc){
     vec2 uv = fc / resolution;
@@ -967,179 +1090,104 @@ vec3 bg_manga(vec2 fc){
     float timeIndex    = floor(time / sceneTime);
     float sceneProgress= fract(time / sceneTime);
 
-    // コマ配列（最大8コマ: 左右各最大4コマ）
-    vec4 panels[8];
-    int panelCount = 0;
-
-    // ノド幅（UV空間）: 片側8px
-    float gutterHalf = 8.0 / resolution.x;
+    float gutterHalf = 8.0 / resolution.x; // ノド片側幅(UV)
 
     manga_initSeed(vec2(timeIndex, 31.7));
 
     if(isWide){
         // ===== 見開きレイアウト =====
-        float cx = mix(0.47, 0.53, manga_random());
-        float gutterL = cx - gutterHalf;  // ノド左端
-        float gutterR = cx + gutterHalf;  // ノド右端
+        float cx     = mix(0.47, 0.53, manga_random());
+        float gutterL = cx - gutterHalf;
+        float gutterR = cx + gutterHalf;
 
-        // ノドの白帯（アニメーションより前に早期リターン）
-        if(uv.x >= gutterL && uv.x <= gutterR){
-            return vec3(1.0);
+        // ノド白帯（早期リターン）
+        if(uv.x >= gutterL && uv.x <= gutterR) return vec3(1.0);
+
+        // 分割数（各ページ1〜3段）
+        float lSplits = floor(manga_random()*3.0) + 1.0;
+        float rSplits = floor(manga_random()*3.0) + 1.0;
+        // シード（左ページ・右ページで独立）
+        float lSeed = manga_hash_f(timeIndex * 3.7 + 11.1);
+        float rSeed = manga_hash_f(timeIndex * 5.3 + 22.2);
+
+        // どのコマか: 左ページ（uv.x < gutterL）or 右ページ（uv.x > gutterR）
+        float totalPanels = lSplits + rSplits;
+        vec4  hitCell = vec4(0.0);
+        float hitId   = -1.0;
+
+        // 左ページ: panelId 0〜lSplits-1
+        for(int i=0;i<3;i++){
+            float fi = float(i);
+            if(fi >= lSplits) break;
+            if(uv.x >= gutterL) break; // 右ページは別処理
+            vec4 cell = manga_getCell(fi, gutterL, gutterR,
+                                      lSplits, rSplits, lSeed, rSeed);
+            if(uv.y >= cell.y && uv.y <= cell.y+cell.w){
+                hitCell = cell; hitId = fi; break;
+            }
         }
-
-        // 各ページの縦分割数: 1〜3段（各ページ最大3段 = 左右合計最大6コマ）
-        int lSplits = int(floor(manga_random()*3.0)) + 1; // 1,2,3
-        int rSplits = int(floor(manga_random()*3.0)) + 1;
-
-        // 左ページ（x: 0〜gutterL）
-        float lY = 0.0;
-        for(int i=0;i<4;i++){
-            if(i>=lSplits) break;
-            float h;
-            if(i==lSplits-1){ h=1.0-lY; }
-            else { float r=mix(0.25,0.55,manga_random()); h=(1.0-lY)*r; }
-            panels[panelCount] = vec4(0.0, lY, gutterL, h);
-            panelCount++;
-            lY += h;
+        // 右ページ: panelId lSplits〜totalPanels-1
+        if(hitId < 0.0){
+            for(int i=0;i<3;i++){
+                float fi = float(i) + lSplits;
+                if(fi >= totalPanels) break;
+                if(uv.x <= gutterR) break;
+                vec4 cell = manga_getCell(fi, gutterL, gutterR,
+                                          lSplits, rSplits, lSeed, rSeed);
+                if(uv.y >= cell.y && uv.y <= cell.y+cell.w){
+                    hitCell = cell; hitId = fi; break;
+                }
+            }
         }
-
-        // 右ページ（x: gutterR〜1）
-        float rY = 0.0;
-        for(int i=0;i<4;i++){
-            if(i>=rSplits) break;
-            float h;
-            if(i==rSplits-1){ h=1.0-rY; }
-            else { float r=mix(0.25,0.55,manga_random()); h=(1.0-rY)*r; }
-            panels[panelCount] = vec4(gutterR, rY, 1.0-gutterR, h);
-            panelCount++;
-            rY += h;
-        }
+        if(hitId < 0.0) return vec3(1.0);
+        return manga_renderCell(fc, hitCell, hitId, timeIndex, sceneProgress, animDuration);
 
     } else {
         // ===== 縦長レイアウト =====
-        int cols = (manga_random() > 0.4) ? 2 : 1;
+        float colRand = manga_random();
+        float cx      = mix(0.40, 0.60, manga_random());
 
-        if(cols==1){
-            // 1列: 縦に2〜4段
-            int rows = int(floor(manga_random()*3.0)) + 2; // 2,3,4
-            float y = 0.0;
-            for(int i=0;i<4;i++){
-                if(i>=rows) break;
-                float h;
-                if(i==rows-1){ h=1.0-y; }
-                else { float r=mix(0.2,0.5,manga_random()); h=(1.0-y)*r; }
-                panels[panelCount] = vec4(0.0, y, 1.0, h);
-                panelCount++;
-                y += h;
+        float lSeed = manga_hash_f(timeIndex * 3.7 + 11.1);
+        float rSeed = manga_hash_f(timeIndex * 5.3 + 22.2);
+
+        if(colRand > 0.4){
+            // 2列
+            float lRows = floor(manga_random()*2.0) + 2.0; // 2,3
+            float rRows = floor(manga_random()*2.0) + 2.0;
+            float isRight = step(cx, uv.x);
+            float rows  = mix(lRows, rRows, isRight);
+            float seed  = mix(lSeed, rSeed, isRight);
+            // 縦バンド特定
+            vec4 hitCell = vec4(0.0);
+            float hitId  = -1.0;
+            float offset = isRight * lRows;
+            for(int i=0;i<3;i++){
+                float fi = float(i);
+                if(fi >= rows) break;
+                vec4 cell = manga_getCellPortrait2(fi+offset, cx, lRows, rRows, lSeed, rSeed);
+                if(uv.y >= cell.y && uv.y <= cell.y+cell.w){
+                    hitCell = cell; hitId = fi+offset; break;
+                }
             }
+            if(hitId < 0.0) return vec3(1.0);
+            return manga_renderCell(fc, hitCell, hitId, timeIndex, sceneProgress, animDuration);
         } else {
-            // 2列: 各列2〜3段
-            float cx = mix(0.40, 0.60, manga_random());
-            int lRows = int(floor(manga_random()*2.0)) + 2; // 2,3
-            int rRows = int(floor(manga_random()*2.0)) + 2;
-
-            float lY = 0.0;
-            for(int i=0;i<3;i++){
-                if(i>=lRows) break;
-                float h;
-                if(i==lRows-1){ h=1.0-lY; }
-                else { float r=mix(0.3,0.6,manga_random()); h=(1.0-lY)*r; }
-                panels[panelCount] = vec4(0.0, lY, cx, h);
-                panelCount++;
-                lY += h;
+            // 1列
+            float rows = floor(manga_random()*3.0) + 2.0; // 2,3,4
+            vec4 hitCell = vec4(0.0);
+            float hitId  = -1.0;
+            for(int i=0;i<4;i++){
+                float fi = float(i);
+                if(fi >= rows) break;
+                vec4 cell = manga_getCellPortrait1(fi, rows, lSeed);
+                if(uv.y >= cell.y && uv.y <= cell.y+cell.w){
+                    hitCell = cell; hitId = fi; break;
+                }
             }
-            float rY = 0.0;
-            for(int i=0;i<3;i++){
-                if(i>=rRows) break;
-                float h;
-                if(i==rRows-1){ h=1.0-rY; }
-                else { float r=mix(0.3,0.6,manga_random()); h=(1.0-rY)*r; }
-                panels[panelCount] = vec4(cx, rY, 1.0-cx, h);
-                panelCount++;
-                rY += h;
-            }
+            if(hitId < 0.0) return vec3(1.0);
+            return manga_renderCell(fc, hitCell, hitId, timeIndex, sceneProgress, animDuration);
         }
     }
-
-    // どのコマに属するか
-    int hitPanel = -1;
-    for(int i=0;i<8;i++){
-        if(i>=panelCount) break;
-        vec4 p = panels[i];
-        if(uv.x>=p.x && uv.x<=p.x+p.z && uv.y>=p.y && uv.y<=p.y+p.w){
-            hitPanel = i;
-            break;
-        }
-    }
-    if(hitPanel<0){ return vec3(1.0); }
-
-    vec4 cell = panels[hitPanel];
-
-    // アニメーション
-    manga_initSeed3(vec3(vec2(float(hitPanel), timeIndex), timeIndex));
-    float cellDelay = manga_random() * 0.3;
-    float cellAnimProgress = clamp((sceneProgress - cellDelay) / animDuration, 0.0, 1.0);
-    float easedProgress = manga_easeOutQuint(cellAnimProgress);
-    float dirRand = manga_random();
-    vec2 slideDir;
-    if(dirRand<0.25)      slideDir=vec2(-1.0, 0.0);
-    else if(dirRand<0.5)  slideDir=vec2( 1.0, 0.0);
-    else if(dirRand<0.75) slideDir=vec2( 0.0,-1.0);
-    else                  slideDir=vec2( 0.0, 1.0);
-    vec2 animatedPixelPos = fc - slideDir*(1.0-easedProgress)*resolution;
-    vec2 animatedUV = animatedPixelPos / resolution;
-
-    bool inCell = (animatedUV.x>=cell.x && animatedUV.x<=cell.x+cell.z &&
-                   animatedUV.y>=cell.y && animatedUV.y<=cell.y+cell.w);
-    if(!inCell){ return vec3(1.0); }
-
-    vec2 cellUV = (animatedUV - cell.xy) / cell.zw;
-    manga_initSeed3(vec3(vec2(float(hitPanel), timeIndex), timeIndex+1.0));
-    vec3 col = manga_mainAgg(cellUV, manga_random(), time);
-
-    // ------------------------------------------
-    // コマ枠・断ち切り判定
-    //
-    // 断ち切り条件（余白ゼロ＋ボーダーなし）:
-    //   - 画面左端に接する → 左辺断ち切り
-    //   - 画面右端に接する → 右辺断ち切り
-    //   - 画面上端に接する → 上辺断ち切り
-    //   - 画面下端に接する → 下辺断ち切り
-    //
-    // ノド側（見開き内側）は通常のボーダーを描く
-    // ------------------------------------------
-    float MARGIN = 6.0;   // コマ間の白余白（px）
-    float BORDER = 4.0;   // 黒枠線の太さ（px）
-
-    vec2 pixelPos  = animatedPixelPos;
-    vec2 cellStart = cell.xy * resolution;
-    vec2 cellSize  = cell.zw * resolution;
-    vec2 cellEnd   = cellStart + cellSize;
-
-    float leftDist   = pixelPos.x - cellStart.x;
-    float rightDist  = cellEnd.x  - pixelPos.x;
-    float topDist    = pixelPos.y - cellStart.y;
-    float bottomDist = cellEnd.y  - pixelPos.y;
-
-    // 断ち切り: 画面端に接する辺は余白・ボーダー共にゼロ
-    float mL = (cell.x           < 0.003) ? 0.0 : MARGIN;
-    float mR = (cell.x + cell.z  > 0.997) ? 0.0 : MARGIN;
-    float mT = (cell.y           < 0.003) ? 0.0 : MARGIN;
-    float mB = (cell.y + cell.w  > 0.997) ? 0.0 : MARGIN;
-
-    float bL = (mL < 0.5) ? 0.0 : BORDER;
-    float bR = (mR < 0.5) ? 0.0 : BORDER;
-    float bT = (mT < 0.5) ? 0.0 : BORDER;
-    float bB = (mB < 0.5) ? 0.0 : BORDER;
-
-    bool inMarginZone = (leftDist<mL || rightDist<mR || topDist<mT || bottomDist<mB);
-    bool isBorder = !inMarginZone &&
-                    (leftDist<(mL+bL) || rightDist<(mR+bR) ||
-                     topDist<(mT+bT)  || bottomDist<(mB+bB));
-
-    if(inMarginZone){ col=vec3(1.0); }
-    else if(isBorder){ col=vec3(0.0); }
-    return col;
 }
 
 vec3 getBackground(vec2 fc){
