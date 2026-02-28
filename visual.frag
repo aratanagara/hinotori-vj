@@ -954,106 +954,125 @@ void manga_initSeed3(vec3 v){manga_gSeed_f=manga_hash3_f(v);}
 float manga_random(){manga_gSeed_f=manga_hash_f(manga_gSeed_f+0.1);return fract(manga_gSeed_f);}
 float manga_easeOutQuint(float t){return 1.0-pow(1.0-t,5.0);}
 
-// ---- manga panel layout (GLSL ES 1.00 compatible) ----
-// 配列・動的インデックス不使用。コマUVをシードから決定論的に計算する
-// コマのUV rect (x,y,w,h) をシードから再現性よく計算するヘルパー
-// splits: 1,2,3  idx: 0〜splits-1
-// 戻り値: vec2(y開始, 高さ) in UV
-vec2 manga_rowBand(float idx, float splits, float seed0){
-    // splits個のバンドをランダム比率で分割
-    // 各バンドの比率を計算（正規化済み）
-    float r0 = mix(0.25,0.55, manga_hash_f(seed0 + 0.0));
-    float r1 = mix(0.25,0.55, manga_hash_f(seed0 + 1.0));
-    float r2 = mix(0.25,0.55, manga_hash_f(seed0 + 2.0));
-    // 使用するバンド数に合わせて正規化
+// ================================================================
+// manga panel layout  (GLSL ES 1.00 compatible – no arrays)
+//
+// 構造: ページ → 行(2〜3段) → 各行を列(1〜2)に分割
+// コマID = row * 4 + col  (最大3行×2列=6コマ/ページ)
+// ================================================================
+
+// 行の y座標・高さ（0〜3行対応）
+vec2 manga_rowY(float rowIdx, float numRows, float pageSeed){
+    float r0 = mix(0.22, 0.50, manga_hash_f(pageSeed + 0.0));
+    float r1 = mix(0.22, 0.50, manga_hash_f(pageSeed + 1.0));
+    float r2 = mix(0.22, 0.50, manga_hash_f(pageSeed + 2.0));
     float y0, h0, y1, h1, y2, h2;
-    if(splits < 1.5){
-        // 1段: 全体
-        y0=0.0; h0=1.0;
-        y1=0.0; h1=0.0;
-        y2=0.0; h2=0.0;
-    } else if(splits < 2.5){
-        // 2段
-        float ra = r0 / (r0+r1);
-        y0=0.0;  h0=ra;
-        y1=ra;   h1=1.0-ra;
-        y2=0.0;  h2=0.0;
+    if(numRows < 1.5){
+        y0=0.0; h0=1.0; y1=0.0; h1=0.0; y2=0.0; h2=0.0;
+    } else if(numRows < 2.5){
+        float s=r0+r1; y0=0.0; h0=r0/s; y1=r0/s; h1=r1/s; y2=0.0; h2=0.0;
     } else {
-        // 3段
-        float s = r0+r1+r2;
-        y0=0.0;          h0=r0/s;
-        y1=r0/s;         h1=r1/s;
-        y2=(r0+r1)/s;    h2=r2/s;
+        float s=r0+r1+r2;
+        y0=0.0; h0=r0/s; y1=r0/s; h1=r1/s; y2=(r0+r1)/s; h2=r2/s;
     }
-    // idx番目のバンドを返す
-    vec2 band = vec2(y0, h0);
-    if(idx > 0.5) band = vec2(y1, h1);
-    if(idx > 1.5) band = vec2(y2, h2);
+    vec2 band = vec2(y0,h0);
+    if(rowIdx > 0.5) band = vec2(y1,h1);
+    if(rowIdx > 1.5) band = vec2(y2,h2);
     return band;
 }
 
-// パネルIDからcell rect (x,y,w,h in UV) を返す（GLSL ES 1.00対応）
-// panelId: 0〜7  isWide, timeIndex, gutterL, gutterR から決定論的に計算
-vec4 manga_getCell(float panelId, float gutterL, float gutterR,
-                   float lSplits, float rSplits,
-                   float lSeed, float rSeed){
-    // 左ページ: panelId 0〜(lSplits-1)
-    // 右ページ: panelId lSplits〜(lSplits+rSplits-1)
-    float isRight = step(lSplits - 0.5, panelId);
-    float rowIdx  = panelId - isRight * lSplits;
-    float splits  = mix(lSplits, rSplits, isRight);
-    float seed    = mix(lSeed,   rSeed,   isRight);
-    float xStart  = mix(0.0,  gutterR, isRight);
-    float xWidth  = mix(gutterL, 1.0-gutterR, isRight);
-
-    vec2 band = manga_rowBand(rowIdx, splits, seed);
-    return vec4(xStart, band.x, xWidth, band.y);
+// 列の x座標・幅（0〜1列対応）
+vec2 manga_colX(float colIdx, float numCols, float xStart, float xW, float rowSeed){
+    if(numCols < 1.5){
+        return vec2(xStart, xW);
+    }
+    float r = mix(0.30, 0.70, manga_hash_f(rowSeed));
+    float x0 = xStart;        float w0 = xW * r;
+    float x1 = xStart + w0;   float w1 = xW * (1.0-r);
+    vec2 band = vec2(x0, w0);
+    if(colIdx > 0.5) band = vec2(x1, w1);
+    return band;
 }
 
-// 縦長レイアウト用: 1列
-vec4 manga_getCellPortrait1(float panelId, float rows, float seed){
-    vec2 band = manga_rowBand(panelId, rows, seed);
-    return vec4(0.0, band.x, 1.0, band.y);
+// ページ内コマ検索（配列引数なし版 – 行ごとに展開）
+// 戻り値.w==0 なら未ヒット、それ以外はコマrect
+// panelIdも返したいので vec4 + 別変数で代用
+vec4 manga_pageHit(vec2 uv, float xStart, float xW,
+                   float numRows, float pageSeed,
+                   // 各行の列数と列シード（最大3行）
+                   float cols0, float cs0,
+                   float cols1, float cs1,
+                   float cols2, float cs2){
+    for(int row=0; row<3; row++){
+        float fr = float(row);
+        if(fr >= numRows) break;
+        vec2 ry = manga_rowY(fr, numRows, pageSeed);
+        // Y判定
+        if(uv.y < ry.x || uv.y > ry.x+ry.y) continue;
+        // この行の列数・シード
+        float nc = cols0;
+        float cs_row = cs0;
+        if(fr > 0.5){ nc=cols1; cs_row=cs1; }
+        if(fr > 1.5){ nc=cols2; cs_row=cs2; }
+        // 列探索
+        for(int col=0; col<2; col++){
+            float fc2 = float(col);
+            if(fc2 >= nc) break;
+            vec2 cx2 = manga_colX(fc2, nc, xStart, xW, cs_row);
+            if(uv.x >= cx2.x && uv.x <= cx2.x+cx2.y){
+                return vec4(cx2.x, ry.x, cx2.y, ry.y);
+            }
+        }
+    }
+    return vec4(-1.0); // 未ヒット
 }
 
-// 縦長レイアウト用: 2列
-vec4 manga_getCellPortrait2(float panelId, float cx,
-                             float lRows, float rRows,
-                             float lSeed, float rSeed){
-    float isRight = step(lRows - 0.5, panelId);
-    float rowIdx  = panelId - isRight * lRows;
-    float rows    = mix(lRows, rRows, isRight);
-    float seed    = mix(lSeed, rSeed, isRight);
-    float xStart  = mix(0.0, cx, isRight);
-    float xWidth  = mix(cx, 1.0-cx, isRight);
-    vec2 band = manga_rowBand(rowIdx, rows, seed);
-    return vec4(xStart, band.x, xWidth, band.y);
+// コマIDをpageHitと同じロジックで算出（アニメーション用）
+float manga_pageId(vec2 uv, float xStart, float xW,
+                   float numRows, float pageSeed,
+                   float cols0, float cs0,
+                   float cols1, float cs1,
+                   float cols2, float cs2){
+    for(int row=0; row<3; row++){
+        float fr = float(row);
+        if(fr >= numRows) break;
+        vec2 ry = manga_rowY(fr, numRows, pageSeed);
+        if(uv.y < ry.x || uv.y > ry.x+ry.y) continue;
+        float nc = cols0; float cs_row = cs0;
+        if(fr > 0.5){ nc=cols1; cs_row=cs1; }
+        if(fr > 1.5){ nc=cols2; cs_row=cs2; }
+        for(int col=0; col<2; col++){
+            float fc2 = float(col);
+            if(fc2 >= nc) break;
+            vec2 cx2 = manga_colX(fc2, nc, xStart, xW, cs_row);
+            if(uv.x >= cx2.x && uv.x <= cx2.x+cx2.y){
+                return fr * 4.0 + fc2;
+            }
+        }
+    }
+    return -1.0;
 }
 
 vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
                       float sceneProgress, float animDuration){
     vec2 uv = fc / resolution;
-    // アニメーション
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
     float cellDelay = manga_random() * 0.3;
     float prog = clamp((sceneProgress - cellDelay) / animDuration, 0.0, 1.0);
-    float ep = manga_easeOutQuint(prog);
-    float dr = manga_random();
+    float ep   = manga_easeOutQuint(prog);
+    float dr   = manga_random();
     vec2 slideDir;
     if(dr<0.25)      slideDir=vec2(-1.0, 0.0);
     else if(dr<0.5)  slideDir=vec2( 1.0, 0.0);
     else if(dr<0.75) slideDir=vec2( 0.0,-1.0);
     else             slideDir=vec2( 0.0, 1.0);
 
-    // 断ち切りフラグ: 約40%の確率で断ち切りコマ
-    // 断ち切りの場合、画面端だけでなく全辺を断ち切り（内枠なし）
-    float bleedRand = manga_random();
-    float isBleed = step(0.60, bleedRand); // 0.0=通常(内枠あり), 1.0=断ち切り
+    // 断ち切りフラグ（約40%）
+    float isBleed = step(0.60, manga_random());
 
     vec2 aPos = fc - slideDir*(1.0-ep)*resolution;
     vec2 aUV  = aPos / resolution;
 
-    // コマ内チェック
     if(aUV.x < cell.x || aUV.x > cell.x+cell.z ||
        aUV.y < cell.y || aUV.y > cell.y+cell.w){
         return vec3(1.0);
@@ -1063,9 +1082,9 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
-    // 枠・断ち切り
-    float MG = 6.0;
-    float BD = 4.0;
+    // 枠線（細め: MG=4, BD=2）
+    float MG = 4.0;
+    float BD = 2.0;
     vec2 cs = cell.xy * resolution;
     vec2 ce = cs + cell.zw * resolution;
     float lD = aPos.x - cs.x;
@@ -1073,20 +1092,17 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     float tD = aPos.y - cs.y;
     float bD = ce.y   - aPos.y;
 
-    // 通常コマ: 画面端に接する辺も含めて全辺に余白+枠を描く（内枠コマ）
-    // 断ち切りコマ: 全辺の余白・枠をゼロ（isBleed=1.0）
-    //   ただし画面端に接しない辺（隣コマとの仕切り）は常にボーダーを描く
-    float atL = step(cell.x,           0.003);  // 1=画面左端
-    float atR = step(0.997, cell.x+cell.z);     // 1=画面右端
-    float atT = step(cell.y,           0.003);  // 1=画面上端
-    float atB = step(0.997, cell.y+cell.w);     // 1=画面下端
+    float atL = step(cell.x,          0.003);
+    float atR = step(0.997, cell.x+cell.z);
+    float atT = step(cell.y,          0.003);
+    float atB = step(0.997, cell.y+cell.w);
 
-    // 余白: 断ち切りかつ画面端 → 0, それ以外 → MG
+    // 断ち切りコマ: 画面端に接する辺のみ余白・枠ゼロ
+    // 通常コマ:     全辺に余白・枠あり（内枠）
     float mL = MG * (1.0 - isBleed * atL);
     float mR = MG * (1.0 - isBleed * atR);
     float mT = MG * (1.0 - isBleed * atT);
     float mB = MG * (1.0 - isBleed * atB);
-    // ボーダー: 断ち切りかつ画面端 → 0, それ以外 → BD
     float bL = BD * (1.0 - isBleed * atL);
     float bR = BD * (1.0 - isBleed * atR);
     float bT = BD * (1.0 - isBleed * atT);
@@ -1094,117 +1110,86 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
 
     bool inMg = (lD<mL || rD<mR || tD<mT || bD<mB);
     bool isBd = !inMg && (lD<mL+bL || rD<mR+bR || tD<mT+bT || bD<mB+bB);
-    if(inMg) col=vec3(1.0);
-    else if(isBd) col=vec3(0.0);
+    if(inMg)      col = vec3(1.0);
+    else if(isBd) col = vec3(0.0);
     return col;
+}
+
+// ページのレイアウトパラメータをシードから生成してコマrectを返す
+vec4 manga_layoutPageCell(vec2 uv, float xStart, float xW, float pageSeed){
+    manga_initSeed(vec2(pageSeed, 99.1));
+    float numRows = floor(manga_random()*2.0) + 2.0;
+    float cols0 = floor(manga_random()*2.0) + 1.0;
+    float cs0   = manga_hash_f(pageSeed + 10.0);
+    float cols1 = floor(manga_random()*2.0) + 1.0;
+    float cs1   = manga_hash_f(pageSeed + 20.0);
+    float cols2 = floor(manga_random()*2.0) + 1.0;
+    float cs2   = manga_hash_f(pageSeed + 30.0);
+    return manga_pageHit(uv, xStart, xW, numRows, pageSeed,
+                         cols0, cs0, cols1, cs1, cols2, cs2);
+}
+
+// ページのレイアウトパラメータをシードから生成してコマIDを返す
+float manga_layoutPageId(vec2 uv, float xStart, float xW, float pageSeed){
+    manga_initSeed(vec2(pageSeed, 99.1));
+    float numRows = floor(manga_random()*2.0) + 2.0;
+    float cols0 = floor(manga_random()*2.0) + 1.0;
+    float cs0   = manga_hash_f(pageSeed + 10.0);
+    float cols1 = floor(manga_random()*2.0) + 1.0;
+    float cs1   = manga_hash_f(pageSeed + 20.0);
+    float cols2 = floor(manga_random()*2.0) + 1.0;
+    float cs2   = manga_hash_f(pageSeed + 30.0);
+    return manga_pageId(uv, xStart, xW, numRows, pageSeed,
+                        cols0, cs0, cols1, cs1, cols2, cs2);
 }
 
 vec3 bg_manga(vec2 fc){
     vec2 uv = fc / resolution;
     bool isWide = (resolution.x / resolution.y) > 1.15;
 
-    float sceneTime    = 3.0;
+    float sceneTime    = 3.5;
     float animDuration = 0.45;
     float timeIndex    = floor(time / sceneTime);
     float sceneProgress= fract(time / sceneTime);
 
-    float gutterHalf = 8.0 / resolution.x; // ノド片側幅(UV)
-
-    manga_initSeed(vec2(timeIndex, 31.7));
+    float gutterHalf = 8.0 / resolution.x;
 
     if(isWide){
         // ===== 見開きレイアウト =====
-        float cx     = mix(0.47, 0.53, manga_random());
+        manga_initSeed(vec2(timeIndex, 31.7));
+        float cx      = mix(0.47, 0.53, manga_random());
         float gutterL = cx - gutterHalf;
         float gutterR = cx + gutterHalf;
 
-        // ノド白帯（早期リターン）
+        // ノド白帯
         if(uv.x >= gutterL && uv.x <= gutterR) return vec3(1.0);
 
-        // 分割数（各ページ1〜3段）
-        float lSplits = floor(manga_random()*3.0) + 1.0;
-        float rSplits = floor(manga_random()*3.0) + 1.0;
-        // シード（左ページ・右ページで独立）
         float lSeed = manga_hash_f(timeIndex * 3.7 + 11.1);
         float rSeed = manga_hash_f(timeIndex * 5.3 + 22.2);
 
-        // どのコマか: 左ページ（uv.x < gutterL）or 右ページ（uv.x > gutterR）
-        float totalPanels = lSplits + rSplits;
-        vec4  hitCell = vec4(0.0);
-        float hitId   = -1.0;
+        vec4  hitCell  = vec4(-1.0);
+        float hitId    = -1.0;
 
-        // 左ページ: panelId 0〜lSplits-1
-        for(int i=0;i<3;i++){
-            float fi = float(i);
-            if(fi >= lSplits) break;
-            if(uv.x >= gutterL) break; // 右ページは別処理
-            vec4 cell = manga_getCell(fi, gutterL, gutterR,
-                                      lSplits, rSplits, lSeed, rSeed);
-            if(uv.y >= cell.y && uv.y <= cell.y+cell.w){
-                hitCell = cell; hitId = fi; break;
-            }
+        if(uv.x < gutterL){
+            hitCell = manga_layoutPageCell(uv, 0.0, gutterL, lSeed);
+            hitId   = manga_layoutPageId  (uv, 0.0, gutterL, lSeed);
+        } else {
+            hitCell = manga_layoutPageCell(uv, gutterR, 1.0-gutterR, rSeed);
+            hitId   = manga_layoutPageId  (uv, gutterR, 1.0-gutterR, rSeed) + 100.0;
         }
-        // 右ページ: panelId lSplits〜totalPanels-1
-        if(hitId < 0.0){
-            for(int i=0;i<3;i++){
-                float fi = float(i) + lSplits;
-                if(fi >= totalPanels) break;
-                if(uv.x <= gutterR) break;
-                vec4 cell = manga_getCell(fi, gutterL, gutterR,
-                                          lSplits, rSplits, lSeed, rSeed);
-                if(uv.y >= cell.y && uv.y <= cell.y+cell.w){
-                    hitCell = cell; hitId = fi; break;
-                }
-            }
-        }
-        if(hitId < 0.0) return vec3(1.0);
+        if(hitCell.x < 0.0) return vec3(1.0);
         return manga_renderCell(fc, hitCell, hitId, timeIndex, sceneProgress, animDuration);
 
     } else {
         // ===== 縦長レイアウト =====
-        float colRand = manga_random();
-        float cx      = mix(0.40, 0.60, manga_random());
-
-        float lSeed = manga_hash_f(timeIndex * 3.7 + 11.1);
-        float rSeed = manga_hash_f(timeIndex * 5.3 + 22.2);
-
-        if(colRand > 0.4){
-            // 2列
-            float lRows = floor(manga_random()*2.0) + 2.0; // 2,3
-            float rRows = floor(manga_random()*2.0) + 2.0;
-            float isRight = step(cx, uv.x);
-            float rows  = mix(lRows, rRows, isRight);
-            float seed  = mix(lSeed, rSeed, isRight);
-            // 縦バンド特定
-            vec4 hitCell = vec4(0.0);
-            float hitId  = -1.0;
-            float offset = isRight * lRows;
-            for(int i=0;i<3;i++){
-                float fi = float(i);
-                if(fi >= rows) break;
-                vec4 cell = manga_getCellPortrait2(fi+offset, cx, lRows, rRows, lSeed, rSeed);
-                if(uv.y >= cell.y && uv.y <= cell.y+cell.w){
-                    hitCell = cell; hitId = fi+offset; break;
-                }
-            }
-            if(hitId < 0.0) return vec3(1.0);
-            return manga_renderCell(fc, hitCell, hitId, timeIndex, sceneProgress, animDuration);
-        } else {
-            // 1列
-            float rows = floor(manga_random()*3.0) + 2.0; // 2,3,4
-            vec4 hitCell = vec4(0.0);
-            float hitId  = -1.0;
-            for(int i=0;i<4;i++){
-                float fi = float(i);
-                if(fi >= rows) break;
-                vec4 cell = manga_getCellPortrait1(fi, rows, lSeed);
-                if(uv.y >= cell.y && uv.y <= cell.y+cell.w){
-                    hitCell = cell; hitId = fi; break;
-                }
-            }
-            if(hitId < 0.0) return vec3(1.0);
-            return manga_renderCell(fc, hitCell, hitId, timeIndex, sceneProgress, animDuration);
-        }
+        manga_initSeed(vec2(timeIndex, 55.3));
+        float seed = manga_hash_f(timeIndex * 4.1 + 7.7);
+        vec4  hitCell = vec4(-1.0);
+        float hitId   = -1.0;
+        hitCell = manga_layoutPageCell(uv, 0.0, 1.0, seed);
+        hitId   = manga_layoutPageId  (uv, 0.0, 1.0, seed);
+        if(hitCell.x < 0.0) return vec3(1.0);
+        return manga_renderCell(fc, hitCell, hitId, timeIndex, sceneProgress, animDuration);
     }
 }
 
