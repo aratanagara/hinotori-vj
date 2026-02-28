@@ -1100,11 +1100,22 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
 
     vec2 uv = fc / resolution;
 
+    // 内枠外かどうか（断ち切り拡張エリア）
+    float outsideT = step(uv.y + 0.001, fMin.y);
+    float outsideB = step(fMax.y, uv.y - 0.001);
+    float outsideL = step(uv.x + 0.001, fMin.x);
+    float outsideR = step(fMax.x, uv.x - 0.001);
+    float outsideFrame = clamp(outsideL + outsideR + outsideT + outsideB, 0.0, 1.0);
+    // 内枠外のピクセルは断ち切りコマのみ（非断ち切りは sMin/sMax クランプ済みで届かない）
+    // → アニメーションを適用しない（常に ep=1 として扱う）
+
     // アニメーション
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
     float cellDelay = manga_random() * 0.25;
     float prog = clamp((sceneProgress - cellDelay) / animDuration, 0.0, 1.0);
     float ep   = manga_easeOutQuint(prog);
+    // 内枠外エリアはアニメーションなし（ep=1固定）
+    ep = mix(ep, 1.0, outsideFrame);
     float dr   = manga_random();
     vec2 slideDir;
     if(dr < 0.25)      slideDir = vec2(-1.0,  0.0);
@@ -1112,18 +1123,7 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     else if(dr < 0.75) slideDir = vec2( 0.0, -1.0);
     else               slideDir = vec2( 0.0,  1.0);
 
-    // 断ち切り辺方向へのスライドは禁止（画面外にはみ出るため）
-    // scrL/R/T/B=1 の辺方向へのスライドを打ち消す
-    slideDir.x = slideDir.x * (1.0 - scrL * step(slideDir.x, -0.5))
-                             * (1.0 - scrR * step( 0.5, slideDir.x));
-    slideDir.y = slideDir.y * (1.0 - scrT * step(slideDir.y, -0.5))
-                             * (1.0 - scrB * step( 0.5, slideDir.y));
-
     vec2 aUV  = uv - slideDir * (1.0 - ep);
-    // 断ち切り辺では aUV がコマ外に出ないようクランプ
-    // （スライド中に画面端断ち切り領域が白くなるのを防ぐ）
-    aUV.x = mix(aUV.x, clamp(aUV.x, sMin.x, sMax.x), clamp(scrL + scrR, 0.0, 1.0));
-    aUV.y = mix(aUV.y, clamp(aUV.y, sMin.y, sMax.y), clamp(scrT + scrB, 0.0, 1.0));
     vec2 aPos = aUV * resolution;
 
     if(aUV.x < sMin.x || aUV.x > sMax.x ||
