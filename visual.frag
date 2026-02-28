@@ -1126,16 +1126,14 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     float tD = aPos.y - csP.y;
     float bD = ceP.y  - aPos.y;
 
-    // tD=sMin側(Y=0が下なので実際は下辺距離)→scrBで制御
-    // bD=sMax側(実際は上辺距離)→scrTで制御
     float mL = SEP_X * (1.0 - scrL);
     float mR = SEP_X * (1.0 - scrR);
-    float mT = SEP_Y * (1.0 - scrB);
-    float mB = SEP_Y * (1.0 - scrT);
+    float mT = SEP_Y * (1.0 - scrT);
+    float mB = SEP_Y * (1.0 - scrB);
     float bL = BD    * (1.0 - scrL);
     float bR = BD    * (1.0 - scrR);
-    float bT = BD    * (1.0 - scrB);
-    float bB = BD    * (1.0 - scrT);
+    float bT = BD    * (1.0 - scrT);
+    float bB = BD    * (1.0 - scrB);
 
     bool inMg = (lD<mL || rD<mR || tD<mT || bD<mB);
     bool isBd = !inMg && (lD<mL+bL || rD<mR+bR || tD<mT+bT || bD<mB+bB);
