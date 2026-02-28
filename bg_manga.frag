@@ -221,10 +221,10 @@ void main() {
     // gutters: if bleed and edge touches page, gutter becomes 0 on that side
     float gL = gutterX, gR = gutterX, gT = gutterY, gB = gutterY;
     if (bleed > 0.5){
-      if (r.x <= 0.0005) gL = 0.0;
-      if (r.y <= 0.0005) gT = 0.0;
-      if (r.z >= 0.9995) gR = 0.0;
-      if (r.w >= 0.9995) gB = 0.0;
+      if (r.x < 0.02) gL = 0.0;
+      if (r.y < 0.02) gT = 0.0;
+      if (r.z > 0.98) gR = 0.0;
+      if (r.w > 0.98) gB = 0.0;
     }
 
     vec4 inner = vec4(r.x + gL, r.y + gT, r.z - gR, r.w - gB);
