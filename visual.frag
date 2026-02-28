@@ -1060,11 +1060,11 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     // isBleed=1: 内枠外周辺を画面端まで拡張（断ち切り）
 
     // ---- 定数 ----
-    float INNER_X = 80.0;  // 内枠 左右余白 px
-    float INNER_Y = 80.0;  // 内枠 上下余白 px
-    float SEP_X   =  5.0;  // コマ間 横余白 px（片側）→ 視覚的間隔: SEP_X*2+BD*2
-    float SEP_Y   = 20.0;  // コマ間 縦余白 px（片側）→ 視覚的間隔: SEP_Y*2+BD*2
-    float BD      =  2.0;  // 枠線の太さ px
+    float INNER_X = 60.0;  // 内枠 左右余白 px
+    float INNER_Y = 60.0;  // 内枠 上下余白 px
+    float SEP_X   =  6.0;  // コマ間 横余白 px（片側）→ 視覚的間隔: SEP_X*2+BD*2
+    float SEP_Y   = 24.0;  // コマ間 縦余白 px（片側）→ 視覚的間隔: SEP_Y*2+BD*2
+    float BD      =  3.0;  // 枠線の太さ px
 
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
     vec2 fMax  = vec2(1.0) - fMin;
@@ -1169,12 +1169,8 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     float isBleed = step(0.55, manga_random());
 
     // 断ち切りでないコマ: 内枠外のピクセルは白
-    // outsideFrame=1: pfMin/pfMax の外側にいる
-    float oL = step(uv.x, pfMin.x - 0.001);  // x < pfMin.x
-    float oR = step(pfMax.x + 0.001, uv.x);  // x > pfMax.x
-    float oT = step(uv.y, pfMin.y - 0.001);  // y < pfMin.y
-    float oB = step(pfMax.y + 0.001, uv.y);  // y > pfMax.y
-    float outsideFrame = clamp(oL + oR + oT + oB, 0.0, 1.0);
+    float outsideFrame = step(1.0, step(uv.x, pfMin.x) + step(pfMax.x, uv.x) +
+                                   step(uv.y, pfMin.y) + step(pfMax.y, uv.y));
     float notBleed = 1.0 - isBleed;
     if(notBleed * outsideFrame > 0.5) return vec3(1.0);
 
