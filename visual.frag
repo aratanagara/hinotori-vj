@@ -1082,9 +1082,15 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
-    // 枠線（内枠20px: MG=20, BD=2）
-    float MG = 20.0;
-    float BD = 2.0;
+    // 枠線の設定:
+    //   INNER  = 120px : 通常コマの画面端側の余白（内枠距離）
+    //   SEP_X  =  20px : コマ間横方向余白
+    //   SEP_Y  =  60px : コマ間縦方向余白
+    //   BD     =   2px : 黒枠線の太さ
+    float INNER = 120.0;
+    float SEP_X =  20.0;
+    float SEP_Y =  60.0;
+    float BD    =   2.0;
     vec2 cs = cell.xy * resolution;
     vec2 ce = cs + cell.zw * resolution;
     float lD = aPos.x - cs.x;
@@ -1092,17 +1098,19 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     float tD = aPos.y - cs.y;
     float bD = ce.y   - aPos.y;
 
-    float atL = step(cell.x,          0.003);
-    float atR = step(0.997, cell.x+cell.z);
-    float atT = step(cell.y,          0.003);
-    float atB = step(0.997, cell.y+cell.w);
+    float atL = step(cell.x,          0.003);  // 1=画面左端
+    float atR = step(0.997, cell.x+cell.z);    // 1=画面右端
+    float atT = step(cell.y,          0.003);  // 1=画面上端
+    float atB = step(0.997, cell.y+cell.w);    // 1=画面下端
 
-    // 断ち切りコマ: 画面端に接する辺のみ余白・枠ゼロ
-    // 通常コマ:     全辺に余白・枠あり（内枠）
-    float mL = MG * (1.0 - isBleed * atL);
-    float mR = MG * (1.0 - isBleed * atR);
-    float mT = MG * (1.0 - isBleed * atT);
-    float mB = MG * (1.0 - isBleed * atB);
+    // 各辺の余白:
+    //   通常コマ: 画面端辺=INNER, コマ間辺=SEP
+    //   断ち切りコマ: 画面端辺=0, コマ間辺=SEP
+    float mL = mix(SEP_X, INNER, atL) * (1.0 - isBleed * atL);
+    float mR = mix(SEP_X, INNER, atR) * (1.0 - isBleed * atR);
+    float mT = mix(SEP_Y, INNER, atT) * (1.0 - isBleed * atT);
+    float mB = mix(SEP_Y, INNER, atB) * (1.0 - isBleed * atB);
+    // ボーダー: 断ち切りかつ画面端 → 0, それ以外 → BD
     float bL = BD * (1.0 - isBleed * atL);
     float bR = BD * (1.0 - isBleed * atR);
     float bT = BD * (1.0 - isBleed * atT);
