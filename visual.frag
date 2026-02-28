@@ -1056,37 +1056,29 @@ float manga_pageId(vec2 uv, float xStart, float xW,
 vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
                       float sceneProgress, float animDuration,
                       float isBleed){
-    // cell: 内枠内UV (0..1) での rect(x,y,w,h)
-    // isBleed=1: 内枠外周辺を画面端まで拡張（断ち切り）
-
-    // ---- 定数 ----
-    float INNER_X = 60.0;  // 内枠 左右余白 px
-    float INNER_Y = 60.0;  // 内枠 上下余白 px
-    float SEP_X   =  6.0;  // コマ間 横余白 px（片側）→ 視覚的間隔: SEP_X*2+BD*2
-    float SEP_Y   = 24.0;  // コマ間 縦余白 px（片側）→ 視覚的間隔: SEP_Y*2+BD*2
-    float BD      =  3.0;  // 枠線の太さ px
+    float INNER_X = 60.0;
+    float INNER_Y = 60.0;
+    float SEP_X   =  6.0;
+    float SEP_Y   = 24.0;
+    float BD      =  3.0;
 
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
     vec2 fMax  = vec2(1.0) - fMin;
     vec2 fSize = fMax - fMin;
 
-    // cell → 画面UV
     vec2 sMin = fMin + cell.xy * fSize;
     vec2 sMax = fMin + (cell.xy + cell.zw) * fSize;
 
-    // 内枠端に接している辺
     float atL = step(cell.x,            0.004);
     float atR = step(0.996, cell.x + cell.z);
     float atT = step(cell.y,            0.004);
     float atB = step(0.996, cell.y + cell.w);
 
-    // 断ち切り: mix で条件分岐なく画面端まで拡張
     sMin.x = mix(sMin.x, 0.0, isBleed * atL);
     sMax.x = mix(sMax.x, 1.0, isBleed * atR);
     sMin.y = mix(sMin.y, 0.0, isBleed * atT);
     sMax.y = mix(sMax.y, 1.0, isBleed * atB);
 
-    // 実際に画面端に到達しているか（断ち切り後）
     float scrL = step(sMin.x, 0.002);
     float scrR = step(0.998, sMax.x);
     float scrT = step(sMin.y, 0.002);
@@ -1095,11 +1087,14 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     // gl_FragCoord.yはY=0が画面下、sMin/sMaxはY=0が上なので反転
     vec2 uv = vec2(fc.x, resolution.y - fc.y) / resolution;
 
-    // アニメーション
+    // アニメーション（フェードイン＋スライド）
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
     float cellDelay = manga_random() * 0.25;
     float prog = clamp((sceneProgress - cellDelay) / animDuration, 0.0, 1.0);
     float ep   = manga_easeOutQuint(prog);
+    float fadeAlpha = clamp(ep * 2.0, 0.0, 1.0);
+    if(fadeAlpha < 0.001) return vec3(1.0);
+
     float dr   = manga_random();
     vec2 slideDir;
     if(dr < 0.25)      slideDir = vec2(-1.0,  0.0);
@@ -1119,7 +1114,6 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
-    // 枠描画: 断ち切り辺(scr=1)は余白・枠ゼロ、それ以外はSEP+BD
     vec2 csP = sMin * resolution;
     vec2 ceP = sMax * resolution;
     float lD = aPos.x - csP.x;
@@ -1140,7 +1134,8 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     bool isBd = !inMg && (lD<mL+bL || rD<mR+bR || tD<mT+bT || bD<mB+bB);
     if(inMg)      col = vec3(1.0);
     else if(isBd) col = vec3(0.0);
-    return col;
+
+    return mix(vec3(1.0), col, fadeAlpha);
 }
 
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
@@ -1170,8 +1165,10 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     float isBleed = step(0.55, manga_random());
 
     // 断ち切りでないコマ: 内枠外のピクセルは白
-    float outsideFrame = step(1.0, step(uv.x, pfMin.x) + step(pfMax.x, uv.x) +
-                                   step(uv.y, pfMin.y) + step(pfMax.y, uv.y));
+    // uv.yはY=0が画面下なので反転してpfMin/pfMax(Y=0が上)と比較
+    vec2 uvFlip = vec2(uv.x, 1.0 - uv.y);
+    float outsideFrame = step(1.0, step(uvFlip.x, pfMin.x) + step(pfMax.x, uvFlip.x) +
+                                   step(uvFlip.y, pfMin.y) + step(pfMax.y, uvFlip.y));
     float notBleed = 1.0 - isBleed;
     if(notBleed * outsideFrame > 0.5) return vec3(1.0);
 
@@ -1180,7 +1177,7 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
 }
 
 vec3 bg_manga(vec2 fc){
-    // gl_FragCoord.yはY=0が画面下、コマレイアウトはY=0が上なので反転
+    // gl_FragCoord.yはY=0が画面下、コマレイアウトはY=0が上
     vec2 uv = vec2(fc.x, resolution.y - fc.y) / resolution;
     bool isWide = (resolution.x / resolution.y) > 1.15;
 
