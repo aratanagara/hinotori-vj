@@ -1114,6 +1114,10 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
                              * (1.0 - scrB * step( 0.5, slideDir.y));
 
     vec2 aUV  = uv - slideDir * (1.0 - ep);
+    // 断ち切り辺では aUV がコマ外に出ないようクランプ
+    // （スライド中に画面端断ち切り領域が白くなるのを防ぐ）
+    aUV.x = mix(aUV.x, clamp(aUV.x, sMin.x, sMax.x), clamp(scrL + scrR, 0.0, 1.0));
+    aUV.y = mix(aUV.y, clamp(aUV.y, sMin.y, sMax.y), clamp(scrT + scrB, 0.0, 1.0));
     vec2 aPos = aUV * resolution;
 
     if(aUV.x < sMin.x || aUV.x > sMax.x ||
