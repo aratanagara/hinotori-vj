@@ -1505,7 +1505,8 @@ void main(){
     return;
   }
 
-  vec2 uv = uvCover(vTexCoord, resolution, texSize);
+  vec2 flippedCoord = vec2(vTexCoord.x, 1.0 - vTexCoord.y);
+  vec2 uv = uvCover(flippedCoord, resolution, texSize);
   if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0){
     vec3 finalBg = applyPaletteAll(bg, gl_FragCoord.xy);
     finalBg = applyGlitchAll(finalBg, gl_FragCoord.xy);
