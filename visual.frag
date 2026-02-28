@@ -1092,7 +1092,8 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     float scrT = step(sMin.y, 0.002);
     float scrB = step(0.998, sMax.y);
 
-    vec2 uv = fc / resolution;
+    // gl_FragCoord.yはY=0が画面下、sMin/sMaxはY=0が上なので反転
+    vec2 uv = vec2(fc.x, resolution.y - fc.y) / resolution;
 
     // アニメーション
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
@@ -1180,8 +1181,7 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
 
 vec3 bg_manga(vec2 fc){
     // gl_FragCoord.yはY=0が画面下、コマレイアウトはY=0が上なので反転
-    fc = vec2(fc.x, resolution.y - fc.y);
-    vec2 uv = fc / resolution;
+    vec2 uv = vec2(fc.x, resolution.y - fc.y) / resolution;
     bool isWide = (resolution.x / resolution.y) > 1.15;
 
     float sceneTime    = 3.5;
