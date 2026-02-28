@@ -1092,7 +1092,7 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     float scrT = step(sMin.y, 0.002);
     float scrB = step(0.998, sMax.y);
 
-    vec2 uv = fc / resolution;
+    vec2 uv = vec2(fc.x, resolution.y - fc.y) / resolution;
 
     // アニメーション
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
@@ -1505,8 +1505,7 @@ void main(){
     return;
   }
 
-  vec2 flippedCoord = vec2(vTexCoord.x, 1.0 - vTexCoord.y);
-  vec2 uv = uvCover(flippedCoord, resolution, texSize);
+  vec2 uv = uvCover(vTexCoord, resolution, texSize);
   if(uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0){
     vec3 finalBg = applyPaletteAll(bg, gl_FragCoord.xy);
     finalBg = applyGlitchAll(finalBg, gl_FragCoord.xy);
