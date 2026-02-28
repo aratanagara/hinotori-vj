@@ -338,6 +338,30 @@ function makeShaderOn(pgOrMainRenderer, loadedShader){
   return pgOrMainRenderer.createShader(vert, frag);
 }
 
+
+// --------------------------------------------------
+// WebGL texture wrap fix for p5.Graphics (2D canvas) used as sampler2D.
+// Prevents REPEAT/wrap sampling that can "erase" panel borders in bgMode==9.
+// --------------------------------------------------
+function clampWrapForGraphics(gfx){
+  try{
+    // main canvas is WEBGL renderer
+    const r = _renderer;
+    if(!r || !r.GL || !r.getTexture) return;
+    const gl = r.GL;
+    const tex = r.getTexture(gfx);
+    if(!tex || !tex.glTex) return;
+    gl.bindTexture(gl.TEXTURE_2D, tex.glTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    // keep linear; nearest can create jaggies on manga edges
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+  }catch(e){
+    // ignore
+  }
+}
 function setup() {
   const cnv = createCanvas(windowWidth, windowHeight, WEBGL);
   noStroke();
@@ -608,6 +632,7 @@ function initBuffers(){
   pgPhoto = createGraphics(Math.floor(windowWidth*PHOTO_SPACE_SCALE), Math.floor(windowHeight*PHOTO_SPACE_SCALE));
   pgPhoto.pixelDensity(1);
   pgPhoto.background(255);
+  clampWrapForGraphics(pgPhoto);
 }
 
 function computeBeatLocal(tSec){
@@ -710,6 +735,7 @@ function draw() {
   shDisplay.setUniform("overlayOn", showRings ? 1 : 0);
   shDisplay.setUniform("showVisual", showVisual ? 1 : 0);
   shDisplay.setUniform("bgExtra", stateTex);
+  clampWrapForGraphics(pgPhoto);
   shDisplay.setUniform("bgPhoto", pgPhoto);
   shDisplay.setUniform("bgPhotoSize", [pgPhoto.width, pgPhoto.height]);
   

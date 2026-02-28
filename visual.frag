@@ -1264,17 +1264,17 @@ vec3 getBackground(vec2 fc){
   if(bgMode==9){
     vec2 uv = fc / resolution;
     float z = max(0.001, bgZoom);
-
-    // camera in normalized texture space
     vec2 cam = bgCamPx / max(bgPhotoSize, vec2(1.0));
 
-    // sample uv (no wrap). We CLAMP so page edges/borders don't disappear when camera drifts.
+    // NOTE:
+    // bgMode 9 は「コマ枠」を保持したいので、タイル回り込み(fract)は使わず、
+    // 0..1 にクランプして境界で欠けないよう half-texel も避ける。
     vec2 suv = (uv - 0.5) / z + 0.5 + cam;
 
-    // p5 texture Y flip
+    // p5 のテクスチャ上下反転
     suv.y = 1.0 - suv.y;
 
-    // avoid sampling exactly on the border (prevents 1px seams / direction-dependent disappearance)
+    // half-texel clamp（境界で 1px 欠け/滲みを抑える）
     vec2 texel = 1.0 / max(bgPhotoSize, vec2(1.0));
     suv = clamp(suv, texel * 0.5, vec2(1.0) - texel * 0.5);
 
