@@ -1061,10 +1061,10 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
 
     // ---- 定数 ----
     float INNER_X = 80.0;  // 内枠 左右余白 px
-    float INNER_Y = 60.0;  // 内枠 上下余白 px
-    float SEP_X   = 12.0;  // コマ間 横余白 px（片側）
-    float SEP_Y   = 16.0;  // コマ間 縦余白 px（片側）
-    float BD      =  1.5;  // 枠線の太さ px
+    float INNER_Y = 80.0;  // 内枠 上下余白 px
+    float SEP_X   = 5.0;  // コマ間 横余白 px（片側）
+    float SEP_Y   = 20.0;  // コマ間 縦余白 px（片側）
+    float BD      =  2.0;  // 枠線の太さ px
 
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
     vec2 fMax  = vec2(1.0) - fMin;
