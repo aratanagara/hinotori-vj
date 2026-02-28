@@ -1179,7 +1179,8 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
 }
 
 vec3 bg_manga(vec2 fc){
-    fc.y = resolution.y - fc.y;
+    // gl_FragCoord.yはY=0が画面下、コマレイアウトはY=0が上なので反転
+    fc = vec2(fc.x, resolution.y - fc.y);
     vec2 uv = fc / resolution;
     bool isWide = (resolution.x / resolution.y) > 1.15;
 
