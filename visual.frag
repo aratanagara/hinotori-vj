@@ -1055,7 +1055,7 @@ float manga_pageId(vec2 uv, float xStart, float xW,
 
 vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
                       float sceneProgress, float animDuration,
-                      float isBleed){
+                      float isBleed, float xStart, float xW){
     // cell: 内枠内UV (0..1) での rect(x,y,w,h)
     // isBleed=1: 内枠外周辺を画面端まで拡張（断ち切り）
 
@@ -1074,9 +1074,15 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     vec2 sMin = fMin + cell.xy * fSize;
     vec2 sMax = fMin + (cell.xy + cell.zw) * fSize;
 
-    // 内枠端に接している辺
-    float atL = step(cell.x,            0.004);
-    float atR = step(0.996, cell.x + cell.z);
+    // 実際に画面端に接している辺（xStart/xWで左右ページを正しく判定）
+    float atL = step(cell.x - xStart,        0.004);  // ページ内左端
+    float atR = step(0.996, cell.x + cell.z - xStart); // ページ内右端、かつ画面右端か
+    // 左ページ: xStart=0なので atLは画面左端。右ページ: xStart>0なのでatLは立たない
+    // さらに実際に画面端かどうかでマスク
+    float pageAtL = step(xStart, 0.004);          // このページが画面左端を含むか
+    float pageAtR = step(0.996, xStart + xW);     // このページが画面右端を含むか
+    atL = atL * pageAtL;
+    atR = atR * pageAtR;
     float atT = step(cell.y,            0.004);
     float atB = step(0.996, cell.y + cell.w);
 
@@ -1095,27 +1101,22 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     // gl_FragCoord.yはY=0が下、sMin/sMaxはY=0が上なので反転
     vec2 uv = vec2(fc.x, resolution.y - fc.y) / resolution;
 
-    // アニメーション種別をランダム選択
-    // 0: フェードイン, 1: スライドイン, 2: ポップアップ(スケール)
+    // アニメーション種別をランダム選択: 0=フェードイン 1=スライドイン 2=ポップアップ
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
     float cellDelay = manga_random() * 0.25;
     float prog = clamp((sceneProgress - cellDelay) / animDuration, 0.0, 1.0);
     float ep   = manga_easeOutQuint(prog);
+    float animType = floor(manga_random() * 3.0);
 
-    float animType = floor(manga_random() * 3.0); // 0,1,2
-
-    vec2 aUV  = uv;
     float fadeAlpha = 1.0;
-    vec2 popSMin = sMin;
-    vec2 popSMax = sMax;
+    vec2 aUV = uv;
 
     if(animType < 0.5) {
         // フェードイン
         fadeAlpha = ep;
-        aUV = uv;
 
     } else if(animType < 1.5) {
-        // スライドイン
+        // スライドイン（4方向ランダム）
         float dr = manga_random();
         vec2 slideDir;
         if(dr < 0.25)      slideDir = vec2(-1.0,  0.0);
@@ -1125,7 +1126,7 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
         aUV = uv - slideDir * (1.0 - ep);
 
     } else {
-        // ポップアップ（コマ中心からスケール）
+        // ポップアップ（コマ中心からスケール拡大）
         vec2 center = (sMin + sMax) * 0.5;
         float scale = mix(0.05, 1.0, ep);
         aUV = (uv - center) / max(scale, 0.001) + center;
@@ -1193,7 +1194,7 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     manga_initSeed3(vec3(panelId, pageSeed, 3.3));
     float isBleed = step(0.55, manga_random());
 
-    // 断ち切りでないコマ: 内枠外のピクセルは白（uv.yはY=0が下なので反転）
+    // 断ち切りでないコマ: 内枠外のピクセルは白
     vec2 uvF = vec2(uv.x, 1.0 - uv.y);
     float outsideFrame = step(1.0, step(uvF.x, pfMin.x) + step(pfMax.x, uvF.x) +
                                    step(uvF.y, pfMin.y) + step(pfMax.y, uvF.y));
@@ -1201,11 +1202,10 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     if(notBleed * outsideFrame > 0.5) return vec3(1.0);
 
     return manga_renderCell(fc, cell, panelId + pageSeed * 0.01,
-                            timeIndex, sceneProgress, animDuration, isBleed);
+                            timeIndex, sceneProgress, animDuration, isBleed, xStart, xW);
 }
 
 vec3 bg_manga(vec2 fc){
-    // Y=0が上の座標系に統一
     vec2 uv = vec2(fc.x, resolution.y - fc.y) / resolution;
     bool isWide = (resolution.x / resolution.y) > 1.15;
 
