@@ -953,6 +953,12 @@ void manga_initSeed(vec2 v){manga_gSeed_f=manga_hash2_f(v);}
 void manga_initSeed3(vec3 v){manga_gSeed_f=manga_hash3_f(v);}
 float manga_random(){manga_gSeed_f=manga_hash_f(manga_gSeed_f+0.1);return fract(manga_gSeed_f);}
 float manga_easeOutQuint(float t){return 1.0-pow(1.0-t,5.0);}
+float manga_easeOutBounce(float t){
+    if(t < 1.0/2.75)      return 7.5625*t*t;
+    else if(t < 2.0/2.75){t -= 1.5/2.75;  return 7.5625*t*t+0.75;}
+    else if(t < 2.5/2.75){t -= 2.25/2.75; return 7.5625*t*t+0.9375;}
+    else                 {t -= 2.625/2.75; return 7.5625*t*t+0.984375;}
+}
 
 // ================================================================
 // manga panel layout  (GLSL ES 1.00 compatible – no arrays)
@@ -1118,10 +1124,11 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
         else               slideDir = vec2( 0.0,  1.0);
         aUV = uv - slideDir * (1.0 - ep);
     } else {
-        // ポップアップ（コマ中心からスケール拡大）
+        // ポップアップ（コマ中心からスケール拡大、easeOutBounce）
         vec2 center = (sMin + sMax) * 0.5;
-        float scale = mix(0.05, 1.0, ep);
-        aUV = (uv - center) / max(scale, 0.001) + center;
+        float epB = manga_easeOutBounce(prog);
+        float scale = max(epB, 0.001);
+        aUV = (uv - center) / scale + center;
     }
 
     if(aUV.x < sMin.x || aUV.x > sMax.x ||
