@@ -1128,28 +1128,24 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
         return vec3(1.0);
     }
 
-    // cellUV は 0..1 にクランプして、境界の浮動小数点誤差で
-    // 枠ピクセルにパターンが滲み出るのを防ぐ
-    vec2 cellUV = clamp((aUV - sMin) / (sMax - sMin), 0.0, 1.0);
+    vec2 cellUV = (aUV - sMin) / (sMax - sMin);
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
-    // 枠描画: アニメーションに関係なく「元のコマ位置」を gl_FragCoord で判定する。
-    // sMin.y/sMax.y は Y=0 が上の UV 座標系なので、
-    // gl_FragCoord（Y=0 が下）へ変換して使用する。
-    vec2 px = gl_FragCoord.xy;
-    float pxL   =        sMin.x * resolution.x;
-    float pxR   =        sMax.x * resolution.x;
-    float pxBtm = (1.0 - sMax.y) * resolution.y;  // UV下端 → gl_FragCoord 底
-    float pxTop = (1.0 - sMin.y) * resolution.y;  // UV上端 → gl_FragCoord 頂
+    // 枠描画: 引数 fc を使う（bg_manga で Y 反転済みの座標系に統一）
+    // fc は Y=0 が上、resolution との対応が uv と一致している
+    float pxL   = sMin.x * resolution.x;
+    float pxR   = sMax.x * resolution.x;
+    float pxTop = sMin.y * resolution.y;  // Y=0 が上なので sMin.y が上端
+    float pxBtm = sMax.y * resolution.y;  // sMax.y が下端
 
-    float dL   = px.x - pxL;
-    float dR   = pxR  - px.x;
-    float dBtm = px.y - pxBtm;
-    float dTop = pxTop - px.y;
+    float dL   = fc.x - pxL;
+    float dR   = pxR  - fc.x;
+    float dTop = fc.y - pxTop;  // fc.y が pxTop より大きければ内側
+    float dBtm = pxBtm - fc.y;
 
-    // scrT: sMin.y≈0=UV上端断ち切り → 上辺(dTop)の枠なし
-    // scrB: sMax.y≈1=UV下端断ち切り → 下辺(dBtm)の枠なし
+    // scrT: sMin.y≈0=上端断ち切り → 上辺の枠なし
+    // scrB: sMax.y≈1=下端断ち切り → 下辺の枠なし
     float mL   = SEP_X * (1.0 - scrL);
     float mR   = SEP_X * (1.0 - scrR);
     float mTop = SEP_Y * (1.0 - scrT);
@@ -1159,18 +1155,12 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     float bTop = BD    * (1.0 - scrT);
     float bBtm = BD    * (1.0 - scrB);
 
-    // 枠判定は gl_FragCoord ベース（アニメ offset の影響を受けない）で行い、
-    // コンテンツの後に確実に上書きする。
-    bool inMg = (dL < mL || dR < mR || dTop < mTop || dBtm < mBtm);
-    bool isBd = !inMg && (dL < mL + bL || dR < mR + bR ||
-                          dTop < mTop + bTop || dBtm < mBtm + bBtm);
+    bool inMg = (dL<mL || dR<mR || dTop<mTop || dBtm<mBtm);
+    bool isBd = !inMg && (dL<mL+bL || dR<mR+bR || dTop<mTop+bTop || dBtm<mBtm+bBtm);
+    if(inMg)      col = vec3(1.0);
+    else if(isBd) col = vec3(0.0);
 
-    // フェードイン後のコンテンツ色を先に決定し、
-    // 枠は fadeAlpha に関わらず常に確定色で上書き（欠け防止）
-    vec3 faded = mix(vec3(1.0), col, fadeAlpha);
-    if(inMg)      return vec3(1.0);
-    else if(isBd) return vec3(0.0);
-    return faded;
+    return mix(vec3(1.0), col, fadeAlpha);
 }
 
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
