@@ -1086,11 +1086,12 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     sMin.y = mix(sMin.y, 0.0, isBleed * atT);
     sMax.y = mix(sMax.y, 1.0, isBleed * atB);
 
-    // 実際に画面端に到達しているか（断ち切り後）
-    float scrL = step(sMin.x, 0.002);
-    float scrR = step(0.998, sMax.x);
-    float scrT = step(sMin.y, 0.002);
-    float scrB = step(0.998, sMax.y);
+    // 画面端に接しているかは「断ち切りかつ内枠端」から直接導出
+    // sMin/sMaxの浮動小数点誤差に依存しない
+    float scrL = isBleed * atL;
+    float scrR = isBleed * atR;
+    float scrT = isBleed * atT;
+    float scrB = isBleed * atB;
 
     vec2 uv = fc / resolution;
 
@@ -1136,16 +1137,14 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     // sMin/sMax も同じ fc/resolution ベースなので座標系が一致する
     float pxL   = sMin.x * resolution.x;
     float pxR   = sMax.x * resolution.x;
-    float pxTop = sMin.y * resolution.y;  // Y=0が上なのでsMin.yが上端
-    float pxBtm = sMax.y * resolution.y;  // sMax.yが下端
+    float pxTop = sMin.y * resolution.y;
+    float pxBtm = sMax.y * resolution.y;
 
     float dL   = fc.x - pxL;
     float dR   = pxR  - fc.x;
     float dTop = fc.y - pxTop;
     float dBtm = pxBtm - fc.y;
 
-    // scrT: sMin.y≈0=上端断ち切り → 上辺の枠なし
-    // scrB: sMax.y≈1=下端断ち切り → 下辺の枠なし
     float mL   = SEP_X * (1.0 - scrL);
     float mR   = SEP_X * (1.0 - scrR);
     float mTop = SEP_Y * (1.0 - scrT);
@@ -1159,8 +1158,8 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     bool isBd = !inMg && (dL<mL+bL || dR<mR+bR || dTop<mTop+bTop || dBtm<mBtm+bBtm);
 
     // 枠にも fadeAlpha を適用してコマと同時に出現させる
-    if(inMg)      return mix(vec3(1.0), vec3(1.0), fadeAlpha); // 余白は常に白
-    if(isBd)      return mix(vec3(1.0), vec3(0.0), fadeAlpha); // 枠線もフェードイン
+    if(inMg)      return vec3(1.0);
+    if(isBd)      return mix(vec3(1.0), vec3(0.0), fadeAlpha);
     return mix(vec3(1.0), col, fadeAlpha);
 }
 
