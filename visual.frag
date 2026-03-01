@@ -1123,18 +1123,24 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
         else               slideDir = vec2( 0.0,  1.0);
         aUV = uv - slideDir * (1.0 - ep);
     } else {
-        // ポップアップ（コマ中心からスケール拡大、easeOutBounce）
+        // ポップアップ（コマ中心からスケール拡大、easeOutElastic）
         vec2 center = (sMin + sMax) * 0.5;
         float epB = manga_easeOutElastic(prog);
         float scale = max(epB, 0.001);
         aUV = (uv - center) / scale + center;
     }
 
-    // クリップは実画面座標(uv)で行う
-    // aUVベースだとeaseOutElasticのオーバーシュート時にコマ外へはみ出す
+    // クリップは常に実画面座標(uv)で行い、コマ領域外には絶対描画しない
     if(uv.x < sMin.x || uv.x > sMax.x ||
        uv.y < sMin.y || uv.y > sMax.y){
         return vec3(1.0);
+    }
+
+    // スライドイン用: aUVがコマ外を指す場合は白（コマ外縁はまだ見えない）
+    bool isSlide = (animType >= 0.5 && animType < 1.5);
+    if(isSlide && (aUV.x < sMin.x || aUV.x > sMax.x ||
+                   aUV.y < sMin.y || aUV.y > sMax.y)){
+        return mix(vec3(1.0), vec3(1.0), fadeAlpha);
     }
 
     vec2 cellUV = clamp((aUV - sMin) / (sMax - sMin), 0.0, 1.0);
