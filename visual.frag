@@ -953,11 +953,10 @@ void manga_initSeed(vec2 v){manga_gSeed_f=manga_hash2_f(v);}
 void manga_initSeed3(vec3 v){manga_gSeed_f=manga_hash3_f(v);}
 float manga_random(){manga_gSeed_f=manga_hash_f(manga_gSeed_f+0.1);return fract(manga_gSeed_f);}
 float manga_easeOutQuint(float t){return 1.0-pow(1.0-t,5.0);}
-float manga_easeOutBounce(float t){
-    if(t < 1.0/2.75)      return 7.5625*t*t;
-    else if(t < 2.0/2.75){t -= 1.5/2.75;  return 7.5625*t*t+0.75;}
-    else if(t < 2.5/2.75){t -= 2.25/2.75; return 7.5625*t*t+0.9375;}
-    else                 {t -= 2.625/2.75; return 7.5625*t*t+0.984375;}
+float manga_easeOutElastic(float t){
+    if(t <= 0.0) return 0.0;
+    if(t >= 1.0) return 1.0;
+    return pow(2.0, -10.0*t) * sin((t*10.0 - 0.75) * (2.0*PI/3.0)) + 1.0;
 }
 
 // ================================================================
@@ -1126,7 +1125,7 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     } else {
         // ポップアップ（コマ中心からスケール拡大、easeOutBounce）
         vec2 center = (sMin + sMax) * 0.5;
-        float epB = manga_easeOutBounce(prog);
+        float epB = manga_easeOutElastic(prog);
         float scale = max(epB, 0.001);
         aUV = (uv - center) / scale + center;
     }
