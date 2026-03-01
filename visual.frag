@@ -1643,7 +1643,6 @@ void main(){
 
   vec3 finalCol = applyPaletteAll(outCol, gl_FragCoord.xy);
   finalCol = applyGlitchAll(finalCol, gl_FragCoord.xy);
-  if(invertPalette != 0){ finalCol = vec3(1.0) - finalCol;  }
-  
+  if(invertPalette != 0){ finalCol = vec3(1.0) - finalCol; }
   gl_FragColor = vec4(finalCol, 1.0);
 }
