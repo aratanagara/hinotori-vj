@@ -1109,6 +1109,8 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
 
     float fadeAlpha = 1.0;
     vec2 aUV = uv;
+    vec2 drawMin = sMin;
+    vec2 drawMax = sMax;
 
     if(animType < 0.5) {
         // フェードイン
@@ -1127,12 +1129,16 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
         vec2 center = (sMin + sMax) * 0.5;
         float epB = manga_easeOutElastic(prog);
         float scale = max(epB, 0.001);
+        // 枠ごとスケール
+        drawMin = center + (sMin - center) * scale;
+        drawMax = center + (sMax - center) * scale;
         aUV = (uv - center) / scale + center;
+        fadeAlpha = clamp(epB, 0.0, 1.0);
     }
 
     // クリップは常に実画面座標(uv)で行い、コマ領域外には絶対描画しない
-    if(uv.x < sMin.x || uv.x > sMax.x ||
-       uv.y < sMin.y || uv.y > sMax.y){
+    if(uv.x < drawMin.x || uv.x > drawMax.x ||
+       uv.y < drawMin.y || uv.y > drawMax.y){
         return vec3(1.0);
     }
 
@@ -1147,26 +1153,28 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
-    // 枠描画: fc（bg_mangaでY反転済み、Y=0が上）を使って判定
-    // sMin/sMax も同じ fc/resolution ベースなので座標系が一致する
-    float pxL   = sMin.x * resolution.x;
-    float pxR   = sMax.x * resolution.x;
-    float pxTop = sMin.y * resolution.y;
-    float pxBtm = sMax.y * resolution.y;
+    // 枠描画: drawMin/drawMaxでスケール済み枠を描く
+    float pxL   = drawMin.x * resolution.x;
+    float pxR   = drawMax.x * resolution.x;
+    float pxTop = drawMin.y * resolution.y;
+    float pxBtm = drawMax.y * resolution.y;
 
     float dL   = fc.x - pxL;
     float dR   = pxR  - fc.x;
     float dTop = fc.y - pxTop;
     float dBtm = pxBtm - fc.y;
 
-    float mL   = SEP_X * (1.0 - scrL);
-    float mR   = SEP_X * (1.0 - scrR);
-    float mTop = SEP_Y * (1.0 - scrT);
-    float mBtm = SEP_Y * (1.0 - scrB);
-    float bL   = BD    * (1.0 - scrL);
-    float bR   = BD    * (1.0 - scrR);
-    float bTop = BD    * (1.0 - scrT);
-    float bBtm = BD    * (1.0 - scrB);
+    // ポップアップ時はSEP/BDもscaleに応じて縮小
+    float popScale = (animType >= 1.5) ? clamp(fadeAlpha, 0.0, 1.0) : 1.0;
+
+    float mL   = SEP_X * (1.0 - scrL) * popScale;
+    float mR   = SEP_X * (1.0 - scrR) * popScale;
+    float mTop = SEP_Y * (1.0 - scrT) * popScale;
+    float mBtm = SEP_Y * (1.0 - scrB) * popScale;
+    float bL   = BD    * (1.0 - scrL) * popScale;
+    float bR   = BD    * (1.0 - scrR) * popScale;
+    float bTop = BD    * (1.0 - scrT) * popScale;
+    float bBtm = BD    * (1.0 - scrB) * popScale;
 
     bool inMg = (dL<mL || dR<mR || dTop<mTop || dBtm<mBtm);
     bool isBd = !inMg && (dL<mL+bL || dR<mR+bR || dTop<mTop+bTop || dBtm<mBtm+bBtm);
