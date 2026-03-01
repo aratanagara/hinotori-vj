@@ -1132,16 +1132,16 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
-    // 枠描画: 引数 fc を使う（bg_manga で Y 反転済みの座標系に統一）
-    // fc は Y=0 が上、resolution との対応が uv と一致している
+    // 枠描画: fc（bg_mangaでY反転済み、Y=0が上）を使って判定
+    // sMin/sMax も同じ fc/resolution ベースなので座標系が一致する
     float pxL   = sMin.x * resolution.x;
     float pxR   = sMax.x * resolution.x;
-    float pxTop = sMin.y * resolution.y;  // Y=0 が上なので sMin.y が上端
-    float pxBtm = sMax.y * resolution.y;  // sMax.y が下端
+    float pxTop = sMin.y * resolution.y;  // Y=0が上なのでsMin.yが上端
+    float pxBtm = sMax.y * resolution.y;  // sMax.yが下端
 
     float dL   = fc.x - pxL;
     float dR   = pxR  - fc.x;
-    float dTop = fc.y - pxTop;  // fc.y が pxTop より大きければ内側
+    float dTop = fc.y - pxTop;
     float dBtm = pxBtm - fc.y;
 
     // scrT: sMin.y≈0=上端断ち切り → 上辺の枠なし
@@ -1157,9 +1157,10 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
 
     bool inMg = (dL<mL || dR<mR || dTop<mTop || dBtm<mBtm);
     bool isBd = !inMg && (dL<mL+bL || dR<mR+bR || dTop<mTop+bTop || dBtm<mBtm+bBtm);
-    if(inMg)      col = vec3(1.0);
-    else if(isBd) col = vec3(0.0);
 
+    // 枠にも fadeAlpha を適用してコマと同時に出現させる
+    if(inMg)      return mix(vec3(1.0), vec3(1.0), fadeAlpha); // 余白は常に白
+    if(isBd)      return mix(vec3(1.0), vec3(0.0), fadeAlpha); // 枠線もフェードイン
     return mix(vec3(1.0), col, fadeAlpha);
 }
 
