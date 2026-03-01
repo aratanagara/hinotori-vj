@@ -1060,8 +1060,9 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     // isBleed=1: 内枠外周辺を画面端まで拡張（断ち切り）
 
     // ---- 定数 ----
-    float INNER_X = 60.0;  // 内枠 左右余白 px
-    float INNER_Y = 60.0;  // 内枠 上下余白 px
+    // INNER_X/Y は bg_manga・manga_renderPage と同じ 80px に統一
+    float INNER_X = 80.0;  // 内枠 左右余白 px
+    float INNER_Y = 80.0;  // 内枠 上下余白 px
     float SEP_X   =  6.0;  // コマ間 横余白 px（片側）→ 視覚的間隔: SEP_X*2+BD*2
     float SEP_Y   = 24.0;  // コマ間 縦余白 px（片側）→ 視覚的間隔: SEP_Y*2+BD*2
     float BD      =  3.0;  // 枠線の太さ px
@@ -1086,8 +1087,7 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     sMin.y = mix(sMin.y, 0.0, isBleed * atT);
     sMax.y = mix(sMax.y, 1.0, isBleed * atB);
 
-    // 画面端に接しているかは「断ち切りかつ内枠端」から直接導出
-    // sMin/sMaxの浮動小数点誤差に依存しない
+    // scrは「断ち切りかつ内枠端」から直接導出（浮動小数点誤差の影響を受けない）
     float scrL = isBleed * atL;
     float scrR = isBleed * atR;
     float scrT = isBleed * atT;
@@ -1158,8 +1158,8 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     bool isBd = !inMg && (dL<mL+bL || dR<mR+bR || dTop<mTop+bTop || dBtm<mBtm+bBtm);
 
     // 枠にも fadeAlpha を適用してコマと同時に出現させる
-    if(inMg)      return vec3(1.0);
-    if(isBd)      return mix(vec3(1.0), vec3(0.0), fadeAlpha);
+    if(inMg)  return vec3(1.0);
+    if(isBd)  return mix(vec3(1.0), vec3(0.0), fadeAlpha);
     return mix(vec3(1.0), col, fadeAlpha);
 }
 
