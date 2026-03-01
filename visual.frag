@@ -1126,63 +1126,62 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
         aUV = uv - slideDir * (1.0 - ep);
     } else {
         // ポップアップ（コマ中心からスケール拡大、easeOutElastic）
-        // easeOutElasticはオーバーシュートで1超え・負値になる場合があるため
-        // クリップ用drawMin/drawMaxには必ずclamp(0..1)済みscaleを使う
         vec2 center = (sMin + sMax) * 0.5;
-        float epB   = manga_easeOutElastic(prog);
-        float scale = max(epB, 0.001);          // コンテンツUV逆変換用（負防止）
-        float scaleClamped = clamp(epB, 0.0, 1.0); // クリップ・フェード用
-        drawMin  = center + (sMin - center) * scaleClamped;
-        drawMax  = center + (sMax - center) * scaleClamped;
-        aUV      = (uv - center) / scale + center;
-        fadeAlpha = scaleClamped;
+        float epB = manga_easeOutElastic(prog);
+        float scale = max(epB, 0.001);
+        // 枠ごとスケール
+        drawMin = center + (sMin - center) * scale;
+        drawMax = center + (sMax - center) * scale;
+        aUV = (uv - center) / scale + center;
+        fadeAlpha = clamp(epB, 0.0, 1.0);
     }
 
-    // クリップ: drawMin/drawMaxの外は白（ポップアップ中は縮んだ枠の外）
+    // クリップは常に実画面座標(uv)で行い、コマ領域外には絶対描画しない
     if(uv.x < drawMin.x || uv.x > drawMax.x ||
        uv.y < drawMin.y || uv.y > drawMax.y){
         return vec3(1.0);
     }
 
-    // スライドイン用: aUVがコマ外を指す場合は白
+    // スライドイン用: aUVがコマ外を指す場合は白（コマ外縁はまだ見えない）
     bool isSlide = (animType >= 0.5 && animType < 1.5);
     if(isSlide && (aUV.x < sMin.x || aUV.x > sMax.x ||
                    aUV.y < sMin.y || aUV.y > sMax.y)){
-        return vec3(1.0);
+        return mix(vec3(1.0), vec3(1.0), fadeAlpha);
     }
 
     vec2 cellUV = clamp((aUV - sMin) / (sMax - sMin), 0.0, 1.0);
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
-    // 枠はアニメーション完了後（prog==1.0）のみ描画
-    // それまでは余白・枠線領域を白に返すだけ
-    bool animDone = (prog >= 1.0);
-
-    float pxL   = sMin.x * resolution.x;
-    float pxR   = sMax.x * resolution.x;
-    float pxTop = sMin.y * resolution.y;
-    float pxBtm = sMax.y * resolution.y;
+    // 枠描画: drawMin/drawMaxでスケール済み枠を描く
+    float pxL   = drawMin.x * resolution.x;
+    float pxR   = drawMax.x * resolution.x;
+    float pxTop = drawMin.y * resolution.y;
+    float pxBtm = drawMax.y * resolution.y;
 
     float dL   = fc.x - pxL;
     float dR   = pxR  - fc.x;
     float dTop = fc.y - pxTop;
     float dBtm = pxBtm - fc.y;
 
-    float mL   = SEP_X * (1.0 - scrL);
-    float mR   = SEP_X * (1.0 - scrR);
-    float mTop = SEP_Y * (1.0 - scrT);
-    float mBtm = SEP_Y * (1.0 - scrB);
-    float bL   = BD    * (1.0 - scrL);
-    float bR   = BD    * (1.0 - scrR);
-    float bTop = BD    * (1.0 - scrT);
-    float bBtm = BD    * (1.0 - scrB);
+    // ポップアップ時はSEP/BDもscaleに応じて縮小
+    float popScale = (animType >= 1.5) ? clamp(fadeAlpha, 0.0, 1.0) : 1.0;
+
+    float mL   = SEP_X * (1.0 - scrL) * popScale;
+    float mR   = SEP_X * (1.0 - scrR) * popScale;
+    float mTop = SEP_Y * (1.0 - scrT) * popScale;
+    float mBtm = SEP_Y * (1.0 - scrB) * popScale;
+    float bL   = BD    * (1.0 - scrL) * popScale;
+    float bR   = BD    * (1.0 - scrR) * popScale;
+    float bTop = BD    * (1.0 - scrT) * popScale;
+    float bBtm = BD    * (1.0 - scrB) * popScale;
 
     bool inMg = (dL<mL || dR<mR || dTop<mTop || dBtm<mBtm);
     bool isBd = !inMg && (dL<mL+bL || dR<mR+bR || dTop<mTop+bTop || dBtm<mBtm+bBtm);
 
-    if(inMg) return vec3(1.0);
-    if(isBd) return animDone ? vec3(0.0) : vec3(1.0);
+    // 枠にも fadeAlpha を適用してコマと同時に出現させる
+    if(inMg)  return vec3(1.0);
+    if(isBd)  return mix(vec3(1.0), vec3(0.0), fadeAlpha);
     return mix(vec3(1.0), col, fadeAlpha);
 }
 
@@ -1644,5 +1643,6 @@ void main(){
   vec3 finalCol = applyPaletteAll(outCol, gl_FragCoord.xy);
   finalCol = applyGlitchAll(finalCol, gl_FragCoord.xy);
   if(invertPalette != 0){ finalCol = vec3(1.0) - finalCol; }
+  
   gl_FragColor = vec4(finalCol, 1.0);
 }
