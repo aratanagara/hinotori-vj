@@ -1130,12 +1130,14 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
         aUV = (uv - center) / scale + center;
     }
 
-    if(aUV.x < sMin.x || aUV.x > sMax.x ||
-       aUV.y < sMin.y || aUV.y > sMax.y){
+    // クリップは実画面座標(uv)で行う
+    // aUVベースだとeaseOutElasticのオーバーシュート時にコマ外へはみ出す
+    if(uv.x < sMin.x || uv.x > sMax.x ||
+       uv.y < sMin.y || uv.y > sMax.y){
         return vec3(1.0);
     }
 
-    vec2 cellUV = (aUV - sMin) / (sMax - sMin);
+    vec2 cellUV = clamp((aUV - sMin) / (sMax - sMin), 0.0, 1.0);
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
