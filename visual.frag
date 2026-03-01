@@ -1212,11 +1212,27 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     manga_initSeed3(vec3(panelId, pageSeed, 3.3));
     float isBleed = step(0.55, manga_random());
 
-    // 断ち切りでないコマ: 内枠外のピクセルは白
-    float outsideFrame = step(1.0, step(uv.x, pfMin.x) + step(pfMax.x, uv.x) +
-                                   step(uv.y, pfMin.y) + step(pfMax.y, uv.y));
-    float notBleed = 1.0 - isBleed;
-    if(notBleed * outsideFrame > 0.5) return vec3(1.0);
+    // 内枠外の余白ピクセルの処理
+    bool outsideL = uv.x < pfMin.x;
+    bool outsideR = uv.x > pfMax.x;
+    bool outsideT = uv.y < pfMin.y;
+    bool outsideB = uv.y > pfMax.y;
+    bool outsideFrame = outsideL || outsideR || outsideT || outsideB;
+
+    if(outsideFrame){
+        if(isBleed < 0.5) return vec3(1.0); // 断ち切りでないコマは内枠内に留める
+
+        // 断ち切りコマ: cell座標が内枠端に接している辺の余白のみ通過させる
+        float atL = step(cell.x, 0.004);
+        float atR = step(0.996, cell.x + cell.z);
+        float atT = step(cell.y, 0.004);
+        float atB = step(0.996, cell.y + cell.w);
+        bool okL = (!outsideL || atL > 0.5);
+        bool okR = (!outsideR || atR > 0.5);
+        bool okT = (!outsideT || atT > 0.5);
+        bool okB = (!outsideB || atB > 0.5);
+        if(!(okL && okR && okT && okB)) return vec3(1.0);
+    }
 
     return manga_renderCell(fc, cell, panelId + pageSeed * 0.01,
                             timeIndex, sceneProgress, animDuration, isBleed);
