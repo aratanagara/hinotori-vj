@@ -1065,12 +1065,13 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     // isBleed=1: 内枠外周辺を画面端まで拡張（断ち切り）
 
     // ---- 定数 ----
-    // INNER_X/Y は bg_manga・manga_renderPage と同じ 80px に統一
-    float INNER_X = 80.0;  // 内枠 左右余白 px
-    float INNER_Y = 80.0;  // 内枠 上下余白 px
-    float SEP_X   =  6.0;  // コマ間 横余白 px（片側）→ 視覚的間隔: SEP_X*2+BD*2
-    float SEP_Y   = 24.0;  // コマ間 縦余白 px（片側）→ 視覚的間隔: SEP_Y*2+BD*2
-    float BD      =  3.0;  // 枠線の太さ px
+    // INNER_X/Y は短辺の5%で画面サイズに追従
+    float INNER_X = min(resolution.x, resolution.y) * 0.05;
+    float INNER_Y = INNER_X;
+    float _short  = min(resolution.x, resolution.y);
+    float SEP_X   = _short * 0.0056;
+    float SEP_Y   = _short * 0.022;
+    float BD      = _short * 0.0028;
 
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
     vec2 fMax  = vec2(1.0) - fMin;
@@ -1188,7 +1189,8 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
                       float timeIndex, float sceneProgress, float animDuration){
     // 内枠パラメータ（manga_renderCellと同じ値）
-    vec2 pfMin = vec2(80.0, 80.0) / resolution;
+    float pfInnerPx = min(resolution.x, resolution.y) * 0.05;
+    vec2 pfMin = vec2(pfInnerPx, pfInnerPx) / resolution;
     vec2 pfMax = vec2(1.0) - pfMin;
 
     manga_initSeed(vec2(pageSeed, 99.1));
@@ -1232,8 +1234,8 @@ vec3 bg_manga(vec2 fc){
     float sceneProgress= fract(time / sceneTime);
 
     // 内枠UV（コマ分割の基準領域）
-    float INNER_X = 80.0;
-    float INNER_Y = 80.0;
+    float INNER_X = min(resolution.x, resolution.y) * 0.05;
+    float INNER_Y = INNER_X;
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
     vec2 fMax  = vec2(1.0) - fMin;
     vec2 fSize = fMax - fMin;
