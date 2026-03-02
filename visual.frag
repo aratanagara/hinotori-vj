@@ -1092,12 +1092,12 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     sMin.y = mix(sMin.y, 0.0, isBleed * atT);
     sMax.y = mix(sMax.y, 1.0, isBleed * atB);
 
-    // scr: 断ち切りかつ内枠端 → BD(枠線)も消す
+    // scr: 断ち切りかつ内枠端 → SEPもBDも消す
     float scrL = isBleed * atL;
     float scrR = isBleed * atR;
     float scrT = isBleed * atT;
     float scrB = isBleed * atB;
-    // edg: 内枠端に接している辺 → SEP(余白)だけ消す（断ち切り有無にかかわらず）
+    // edg: 内枠端に接している辺 → SEPだけ消す（枠線は残す）
     float edgL = atL;
     float edgR = atR;
     float edgT = atT;
