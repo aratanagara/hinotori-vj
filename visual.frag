@@ -1303,7 +1303,7 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
     res = mix(vec3(1.0), res, fadeAlpha);
     return mix(res, vec3(1.0), whiteMask);
 }
-vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
+vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV_raw, vec2 innerUV, float xStart, float xW, float pageSeed,
                       float timeIndex, float sceneProgress, float animDuration){
 
     manga_initSeed(vec2(pageSeed, 99.1));
@@ -1384,17 +1384,17 @@ vec3 bg_manga(vec2 fc){
         float igR = (gutterR - fMin.x) / fSize.x;
 
         if(uv.x < gutterL){
-            return manga_renderPage(fc, uv, innerUV, 0.0, igL,
+            return manga_renderPage(fc, uv, innerUV_raw, innerUV, 0.0, igL,
                                     lSeed, timeIndex, sceneProgress, animDuration);
         } else {
-            return manga_renderPage(fc, uv, innerUV, igR, 1.0 - igR,
+            return manga_renderPage(fc, uv, innerUV_raw, innerUV, igR, 1.0 - igR,
                                     rSeed, timeIndex, sceneProgress, animDuration);
         }
 
     } else {
         manga_initSeed(vec2(timeIndex, 55.3));
         float seed = manga_hash_f(timeIndex * 4.1 + 7.7);
-        return manga_renderPage(fc, uv, innerUV, 0.0, 1.0,
+        return manga_renderPage(fc, uv, innerUV_raw, innerUV, 0.0, 1.0,
                                 seed, timeIndex, sceneProgress, animDuration);
     }
 }
