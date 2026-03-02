@@ -1296,7 +1296,10 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
              * (1.0 - smoothstep((s3+BD*0.5)-aa, (s3+BD*0.5)+aa, d3));
 
     float inBd = max(max(b0,b1), max(b2,b3));
-    vec3 res = mix(col, vec3(0.0), inBd * fadeAlpha);
+
+    // AAで灰っぽく見えるのを抑えて“黒”を維持
+    float inBdInk = smoothstep(0.12, 1.0, inBd);
+    vec3 res = mix(col, vec3(0.0), inBdInk * fadeAlpha);
     res = mix(vec3(1.0), res, fadeAlpha);
     return mix(res, vec3(1.0), whiteMask);
 }
@@ -1339,7 +1342,7 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     if(uv.y < pfMin3.y && min(rb.x, rb.y) > eps)                return vec3(1.0);
     if(uv.y > pfMax3.y && max(rb.z, rb.w) < 1.0 - eps)         return vec3(1.0);
 
-    return manga_renderCell(innerUV, rb, cb,
+    return manga_renderCell(innerUV_raw, rb, cb,
                             panelId + pageSeed * 0.01,
                             timeIndex, sceneProgress, animDuration);
 }
@@ -1361,7 +1364,8 @@ vec3 bg_manga(vec2 fc){
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
     vec2 fMax  = vec2(1.0) - fMin;
     vec2 fSize = fMax - fMin;
-    vec2 innerUV = clamp((uv - fMin) / fSize, 0.0, 1.0);
+    vec2 innerUV_raw = (uv - fMin) / fSize;
+    vec2 innerUV = clamp(innerUV_raw, 0.0, 1.0);
 
     float gutterHalf = 8.0 / resolution.x;
 
