@@ -1162,7 +1162,8 @@ vec4 manga_pageHit2(vec2 uv, float xStart, float xW,
 
 vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
                       float panelId, float timeIndex,
-                      float sceneProgress, float animDuration){
+                      float sceneProgress, float animDuration,
+                      float bleedL, float bleedR, float bleedT, float bleedB){
     float _short = min(resolution.x, resolution.y);
     float SEP    = _short * 0.006;
     float BD     = _short * 0.0028 + 1.0; // +1px
@@ -1229,12 +1230,27 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
     vec2 fSize    = vec2(1.0) - 2.0*vec2(INNER)/resolution;
     vec2 uvRes    = fSize * resolution;
 
-    // quadDistはUV単位を返すのでuvRes.xをかけてpx単位に変換
-    float dist = manga_quadDist(innerUV, P0,P1,P2,P3, uvRes) * uvRes.x;
-    float aa   = 1.0;
-    // 余白（コマ間）: dist < SEP → 白。ハードカットは使わず AA で白へフェード
-    float whiteMask = 1.0 - smoothstep(SEP - aa, SEP + aa, dist);
-    float inBd  = smoothstep(SEP-aa,SEP+aa,dist)*(1.0-smoothstep(SEP+BD-aa,SEP+BD+aa,dist));
+    // 各辺の距離（px）
+    float dTop = manga_edgePxDist(innerUV, P0, P1, uvRes) * uvRes.x;
+    float dRgt = manga_edgePxDist(innerUV, P1, P2, uvRes) * uvRes.x;
+    float dBot = manga_edgePxDist(innerUV, P2, P3, uvRes) * uvRes.x;
+    float dLft = manga_edgePxDist(innerUV, P3, P0, uvRes) * uvRes.x;
+
+    float aa   = 1.0; // AA 1px
+
+    // 余白（コマ間）: dist < SEP → 白。ただし断ち切り側は余白を作らない
+    float wTop = (bleedT < 0.5) ? (1.0 - smoothstep(SEP - aa, SEP + aa, dTop)) : 0.0;
+    float wRgt = (bleedR < 0.5) ? (1.0 - smoothstep(SEP - aa, SEP + aa, dRgt)) : 0.0;
+    float wBot = (bleedB < 0.5) ? (1.0 - smoothstep(SEP - aa, SEP + aa, dBot)) : 0.0;
+    float wLft = (bleedL < 0.5) ? (1.0 - smoothstep(SEP - aa, SEP + aa, dLft)) : 0.0;
+    float whiteMask = max(max(wTop, wRgt), max(wBot, wLft));
+
+    // 枠線: SEP..SEP+BD が黒。ただし断ち切り側は枠線を描かない（画面端で消える）
+    float bTop = (bleedT < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dTop) * (1.0 - smoothstep(SEP+BD-aa, SEP+BD+aa, dTop))) : 0.0;
+    float bRgt = (bleedR < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dRgt) * (1.0 - smoothstep(SEP+BD-aa, SEP+BD+aa, dRgt))) : 0.0;
+    float bBot = (bleedB < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dBot) * (1.0 - smoothstep(SEP+BD-aa, SEP+BD+aa, dBot))) : 0.0;
+    float bLft = (bleedL < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dLft) * (1.0 - smoothstep(SEP+BD-aa, SEP+BD+aa, dLft))) : 0.0;
+    float inBd = max(max(bTop, bRgt), max(bBot, bLft));
 
     vec3 res = mix(col, vec3(0.0), inBd * fadeAlpha);
     res = mix(vec3(1.0), res, fadeAlpha);
@@ -1318,7 +1334,8 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, vec2 innerUV_raw, float xS
 
     return manga_renderCell(innerUV_raw, rb2, cb2,
                             panelId + pageSeed * 0.01,
-                            timeIndex, sceneProgress, animDuration);
+                            timeIndex, sceneProgress, animDuration,
+                            bleedL?1.0:0.0, bleedR?1.0:0.0, bleedT?1.0:0.0, bleedB?1.0:0.0);
 
 }
 
