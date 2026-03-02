@@ -1286,21 +1286,19 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
     float s2 = SEP / max(k2, 1e-3);
     float s3 = SEP / max(k3, 1e-3);
 
-    float b0 = smoothstep((s0-BD*0.5)-aa, (s0-BD*0.5)+aa, d0)
+    float b0 = smoothstep(((s0-2.0)-BD*0.5)-aa, ((s0-2.0)-BD*0.5)+aa, d0)
              * (1.0 - smoothstep((s0+BD*0.5)-aa, (s0+BD*0.5)+aa, d0));
-    float b1 = smoothstep((s1-BD*0.5)-aa, (s1-BD*0.5)+aa, d1)
+    float b1 = smoothstep(((s1-2.0)-BD*0.5)-aa, ((s1-2.0)-BD*0.5)+aa, d1)
              * (1.0 - smoothstep((s1+BD*0.5)-aa, (s1+BD*0.5)+aa, d1));
-    float b2 = smoothstep((s2-BD*0.5)-aa, (s2-BD*0.5)+aa, d2)
+    float b2 = smoothstep(((s2-2.0)-BD*0.5)-aa, ((s2-2.0)-BD*0.5)+aa, d2)
              * (1.0 - smoothstep((s2+BD*0.5)-aa, (s2+BD*0.5)+aa, d2));
-    float b3 = smoothstep((s3-BD*0.5)-aa, (s3-BD*0.5)+aa, d3)
+    float b3 = smoothstep(((s3-2.0)-BD*0.5)-aa, ((s3-2.0)-BD*0.5)+aa, d3)
              * (1.0 - smoothstep((s3+BD*0.5)-aa, (s3+BD*0.5)+aa, d3));
 
     float inBd = max(max(b0,b1), max(b2,b3));
-    // 先に“コマ内容→白”を作り、その上に枠線を重ねる（白マスクで枠線が消えないように）
-    vec3 res = mix(vec3(1.0), col, fadeAlpha);          // コンテンツ（フェード）
-    res = mix(res, vec3(1.0), whiteMask);               // ガターを白へ（※まだ枠線は載せない）
-    res = mix(res, vec3(0.0), inBd * fadeAlpha);        // 枠線を最終合成（ガター側にも出る）
-    return res;
+    vec3 res = mix(col, vec3(0.0), inBd * fadeAlpha);
+    res = mix(vec3(1.0), res, fadeAlpha);
+    return mix(res, vec3(1.0), whiteMask);
 }
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
                       float timeIndex, float sceneProgress, float animDuration){
