@@ -1286,10 +1286,14 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
     float s2 = SEP / max(k2, 1e-3);
     float s3 = SEP / max(k3, 1e-3);
 
-    float b0 = smoothstep(s0-aa, s0+aa, d0) * (1.0 - smoothstep(s0+BD-aa, s0+BD+aa, d0));
-    float b1 = smoothstep(s1-aa, s1+aa, d1) * (1.0 - smoothstep(s1+BD-aa, s1+BD+aa, d1));
-    float b2 = smoothstep(s2-aa, s2+aa, d2) * (1.0 - smoothstep(s2+BD-aa, s2+BD+aa, d2));
-    float b3 = smoothstep(s3-aa, s3+aa, d3) * (1.0 - smoothstep(s3+BD-aa, s3+BD+aa, d3));
+    float b0 = smoothstep((s0-BD*0.5)-aa, (s0-BD*0.5)+aa, d0)
+             * (1.0 - smoothstep((s0+BD*0.5)-aa, (s0+BD*0.5)+aa, d0));
+    float b1 = smoothstep((s1-BD*0.5)-aa, (s1-BD*0.5)+aa, d1)
+             * (1.0 - smoothstep((s1+BD*0.5)-aa, (s1+BD*0.5)+aa, d1));
+    float b2 = smoothstep((s2-BD*0.5)-aa, (s2-BD*0.5)+aa, d2)
+             * (1.0 - smoothstep((s2+BD*0.5)-aa, (s2+BD*0.5)+aa, d2));
+    float b3 = smoothstep((s3-BD*0.5)-aa, (s3-BD*0.5)+aa, d3)
+             * (1.0 - smoothstep((s3+BD*0.5)-aa, (s3+BD*0.5)+aa, d3));
 
     float inBd = max(max(b0,b1), max(b2,b3));
     vec3 res = mix(col, vec3(0.0), inBd * fadeAlpha);
