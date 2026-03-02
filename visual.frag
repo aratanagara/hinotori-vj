@@ -443,22 +443,15 @@ vec3 bn_mrch(vec3 ro, vec3 rd){
   float d0 = 0.0;
   float id = 0.0;
   float it = 0.0;
-  float active = 1.0;
   for(int i=0;i<BN_ITR;i++){
     it = float(i);
-    if(active > 0.5){
-      vec3 sp = ro + rd * d0;
-      vec2 ds = bn_map(sp);
-      // 終了条件（break禁止のため active で停止）
-      if(abs(ds.x) < BN_SRF){
-        active = 0.0;
-      }else if(d0 > BN_DST){
-        active = 0.0;
-      }else{
-        d0 += ds.x;
-        id  = ds.y;
-      }
+    vec3 sp = ro + rd * d0;
+    vec2 ds = bn_map(sp);
+    if(abs(ds.x) < BN_SRF || d0 > BN_DST){
+      if(abs(ds.x) < BN_SRF){ d0 = 0.0; }else{ break; }
     }
+    d0 += ds.x;
+    id  = ds.y;
   }
   if(d0 > BN_DST) d0 = 0.0;
   return vec3(d0, id, it);
@@ -1057,20 +1050,6 @@ vec2 manga_quadP3(float b1L,float b1R,float lB){ return vec2(lB, manga_hBndY(lB,
 // 2D cross: e×v = e.x*v.y - e.y*v.x
 float manga_cross2(vec2 e, vec2 v){ return e.x*v.y - e.y*v.x; }
 
-// y方向だけスケールした空間での、辺(A->B)から点pへの符号付き距離（px）
-// - p/A/B は「px座標」
-// - yScale=0.25 なら、見かけの垂直厚みが4倍になる
-float manga_edgeDistScaledPx(vec2 pPx, vec2 APx, vec2 BPx, float yScale){
-    vec2 p  = vec2(pPx.x,  pPx.y  * yScale);
-    vec2 A  = vec2(APx.x,  APx.y  * yScale);
-    vec2 B  = vec2(BPx.x,  BPx.y  * yScale);
-    vec2 e  = B - A;
-    float len = max(length(e), 1e-6);
-    float c = manga_cross2(e, p - A);
-    return c / len;
-}
-
-
 bool manga_inQuad(vec2 p, vec2 P0, vec2 P1, vec2 P2, vec2 P3){
     float d0=manga_cross2(P1-P0, p-P0);
     float d1=manga_cross2(P2-P1, p-P1);
@@ -1089,6 +1068,14 @@ float manga_edgePxDist(vec2 uv, vec2 A, vec2 B, vec2 res){
     float lenPx = length(e * res);
     float c = e.x*(uv.y-A.y) - e.y*(uv.x-A.x);
     return (lenPx > 0.0001) ? c * res.x / lenPx : 9999.0;
+}
+
+float manga_edgePxDistScaled(vec2 uv, vec2 A, vec2 B, vec2 res, float yScale){
+    vec2 uvS = vec2(uv.x, uv.y * yScale);
+    vec2 AS  = vec2(A.x,  A.y  * yScale);
+    vec2 BS  = vec2(B.x,  B.y  * yScale);
+    vec2 resS = vec2(res.x, res.y * yScale);
+    return manga_edgePxDist(uvS, AS, BS, resS);
 }
 
 float manga_quadDist(vec2 uv, vec2 P0, vec2 P1, vec2 P2, vec2 P3, vec2 res){
@@ -1183,11 +1170,10 @@ vec4 manga_pageHit2(vec2 uv, float xStart, float xW,
 
 vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
                       float panelId, float timeIndex,
-                      float sceneProgress, float animDuration,
-                      float bleedL, float bleedR, float bleedT, float bleedB){
+                      float sceneProgress, float animDuration){
     float _short = min(resolution.x, resolution.y);
     float SEP    = _short * 0.006;
-    float BD     = _short * 0.0028 + 1.0; // +1px
+    float BD     = _short * 0.0028;
 
     // innerUV空間(0..1)での頂点
     vec2 P0 = manga_quadP0(rowBand.x, rowBand.y, colBand.x);
@@ -1219,21 +1205,14 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
         aUV = innerUV - sd*(1.0-ep)*0.4;
         fadeAlpha = ep;
     } else {
-        // ポップアップ（飛び出しOK）
-        float epB = manga_easeOutElastic(prog);  // 0..1 を超えるオーバーシュートあり
+        // ポップアップ
+        float epB = manga_easeOutElastic(prog);
         float sc  = max(epB, 0.001);
         vec2 ctr  = (P0+P1+P2+P3)*0.25;
-
-        // ★ コマ自体をスケールして「本来の範囲から飛び出す」
-        P0 = ctr + (P0 - ctr) * sc;
-        P1 = ctr + (P1 - ctr) * sc;
-        P2 = ctr + (P2 - ctr) * sc;
-        P3 = ctr + (P3 - ctr) * sc;
-
-        // 中身も一緒に拡大（描画点→元UVへ逆変換）
-        aUV = ctr + (innerUV - ctr) / sc;
-
-        // クリップはしない（白で切らない）
+        vec2 mn   = ctr + (min(min(P0,P1),min(P2,P3))-ctr)*sc;
+        vec2 mx   = ctr + (max(max(P0,P1),max(P2,P3))-ctr)*sc;
+        if(innerUV.x<mn.x||innerUV.x>mx.x||innerUV.y<mn.y||innerUV.y>mx.y)
+            return vec3(1.0);
         fadeAlpha = clamp(epB, 0.0, 1.0);
     }
 
@@ -1246,82 +1225,78 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
         manga_random(), time);
 
     // 枠線（innerUV空間のuvResでpx換算）
-float _short2 = min(resolution.x, resolution.y);
-float INNER   = _short2 * 0.05;
-vec2 fSize    = vec2(1.0) - 2.0*vec2(INNER)/resolution;
-vec2 uvRes    = fSize * resolution;
+    float _short2 = min(resolution.x, resolution.y);
+    float INNER   = _short2 * 0.05;
+    vec2 fSize    = vec2(1.0) - 2.0*vec2(INNER)/resolution;
+    vec2 uvRes    = fSize * resolution;
 
-// ------------------------------------------------------------
-// 余白（コマ間）の「縦:横 = 4:1」化
-// - 縦方向の厚みが4倍になるように、距離計算だけ y を 0.25倍した空間で行う
-// - 斜め線でも「垂直方向の高さ」が4倍になる（要求仕様）
-// ------------------------------------------------------------
-float yScale = 0.25; // 1/4 -> 見かけの垂直厚み4倍
+    // ガターは「縦方向だけ4倍」：Yを1/4に圧縮した空間で距離を計算する
+    // 斜め線でも“垂直方向の高さ”が4倍になる
+    float yScale = 0.25;
 
-// px座標へ
-vec2 pPx  = innerUV * uvRes;
-vec2 P0Px = P0 * uvRes;
-vec2 P1Px = P1 * uvRes;
-vec2 P2Px = P2 * uvRes;
-vec2 P3Px = P3 * uvRes;
+    // 各辺への距離（通常）と（ガター用スケール）
+    float d0 = manga_edgePxDist(innerUV, P0, P1, uvRes) * uvRes.x;
+    float d1 = manga_edgePxDist(innerUV, P1, P2, uvRes) * uvRes.x;
+    float d2 = manga_edgePxDist(innerUV, P2, P3, uvRes) * uvRes.x;
+    float d3 = manga_edgePxDist(innerUV, P3, P0, uvRes) * uvRes.x;
 
-// 各辺の距離（scaled-px）＋ AAを「実ピクセル1px」に合わせてedgeごとに補正
-float aa = 1.0; // 実ピクセルでのAA幅
+    float g0 = manga_edgePxDistScaled(innerUV, P0, P1, uvRes, yScale) * uvRes.x;
+    float g1 = manga_edgePxDistScaled(innerUV, P1, P2, uvRes, yScale) * uvRes.x;
+    float g2 = manga_edgePxDistScaled(innerUV, P2, P3, uvRes, yScale) * uvRes.x;
+    float g3 = manga_edgePxDistScaled(innerUV, P3, P0, uvRes, yScale) * uvRes.x;
 
-// top (P0->P1)
-vec2 eTop = P1Px - P0Px;
-float lenTop = max(length(eTop), 1e-6);
-vec2 tTop = eTop / lenTop;
-vec2 nTop = vec2(-tTop.y, tTop.x);
-float kTop = length(vec2(nTop.x, nTop.y * yScale));
-float dTop = manga_edgeDistScaledPx(pPx, P0Px, P1Px, yScale);
-float aaTop = aa * kTop;
+    float distGut = min(min(g0,g1), min(g2,g3));
 
-// right (P1->P2)
-vec2 eRgt = P2Px - P1Px;
-float lenRgt = max(length(eRgt), 1e-6);
-vec2 tRgt = eRgt / lenRgt;
-vec2 nRgt = vec2(-tRgt.y, tRgt.x);
-float kRgt = length(vec2(nRgt.x, nRgt.y * yScale));
-float dRgt = manga_edgeDistScaledPx(pPx, P1Px, P2Px, yScale);
-float aaRgt = aa * kRgt;
+    // AAは常に1px（実ピクセル）
+    float aa = 1.0;
 
-// bottom (P2->P3)
-vec2 eBot = P3Px - P2Px;
-float lenBot = max(length(eBot), 1e-6);
-vec2 tBot = eBot / lenBot;
-vec2 nBot = vec2(-tBot.y, tBot.x);
-float kBot = length(vec2(nBot.x, nBot.y * yScale));
-float dBot = manga_edgeDistScaledPx(pPx, P2Px, P3Px, yScale);
-float aaBot = aa * kBot;
+    // 余白（コマ間）: distGut < SEP → 白（縦だけ4倍）
+    float whiteMask = 1.0 - smoothstep(SEP - aa, SEP + aa, distGut);
 
-// left (P3->P0)
-vec2 eLft = P0Px - P3Px;
-float lenLft = max(length(eLft), 1e-6);
-vec2 tLft = eLft / lenLft;
-vec2 nLft = vec2(-tLft.y, tLft.x);
-float kLft = length(vec2(nLft.x, nLft.y * yScale));
-float dLft = manga_edgeDistScaledPx(pPx, P3Px, P0Px, yScale);
-float aaLft = aa * kLft;
+    // 枠線は“均一な太さ”にしたいので、BDは通常距離（d0..d3）で作る。
+    // ガター境界(distGut=SEP)が通常距離でどれだけ離れているかは辺の向きで変わるため、
+    // k = ||n_scaled|| を使って start = SEP / k に変換してから均一BDを載せる。
+    vec2 e0 = (P1 - P0) * uvRes;
+    vec2 e1 = (P2 - P1) * uvRes;
+    vec2 e2 = (P3 - P2) * uvRes;
+    vec2 e3 = (P0 - P3) * uvRes;
 
-// 余白（コマ間）: dist < SEP → 白。ただし断ち切り側は余白を作らない
-float wTop = (bleedT < 0.5) ? (1.0 - smoothstep(SEP - aaTop, SEP + aaTop, dTop)) : 0.0;
-float wRgt = (bleedR < 0.5) ? (1.0 - smoothstep(SEP - aaRgt, SEP + aaRgt, dRgt)) : 0.0;
-float wBot = (bleedB < 0.5) ? (1.0 - smoothstep(SEP - aaBot, SEP + aaBot, dBot)) : 0.0;
-float wLft = (bleedL < 0.5) ? (1.0 - smoothstep(SEP - aaLft, SEP + aaLft, dLft)) : 0.0;
-float whiteMask = max(max(wTop, wRgt), max(wBot, wLft));
+    float l0 = max(length(e0), 1e-6);
+    float l1 = max(length(e1), 1e-6);
+    float l2 = max(length(e2), 1e-6);
+    float l3 = max(length(e3), 1e-6);
 
-// 枠線: SEP..SEP+BD が黒。ただし断ち切り側は枠線を描かない（画面端で消える）
-float bTop = (bleedT < 0.5) ? (smoothstep(SEP-aaTop, SEP+aaTop, dTop) * (1.0 - smoothstep(SEP+BD-aaTop, SEP+BD+aaTop, dTop))) : 0.0;
-float bRgt = (bleedR < 0.5) ? (smoothstep(SEP-aaRgt, SEP+aaRgt, dRgt) * (1.0 - smoothstep(SEP+BD-aaRgt, SEP+BD+aaRgt, dRgt))) : 0.0;
-float bBot = (bleedB < 0.5) ? (smoothstep(SEP-aaBot, SEP+aaBot, dBot) * (1.0 - smoothstep(SEP+BD-aaBot, SEP+BD+aaBot, dBot))) : 0.0;
-float bLft = (bleedL < 0.5) ? (smoothstep(SEP-aaLft, SEP+aaLft, dLft) * (1.0 - smoothstep(SEP+BD-aaLft, SEP+BD+aaLft, dLft))) : 0.0;
-float inBd = max(max(bTop, bRgt), max(bBot, bLft));
+    vec2 t0 = e0 / l0;
+    vec2 t1 = e1 / l1;
+    vec2 t2 = e2 / l2;
+    vec2 t3 = e3 / l3;
+
+    vec2 n0 = vec2(-t0.y, t0.x);
+    vec2 n1 = vec2(-t1.y, t1.x);
+    vec2 n2 = vec2(-t2.y, t2.x);
+    vec2 n3 = vec2(-t3.y, t3.x);
+
+    float k0 = length(vec2(n0.x, n0.y * yScale));
+    float k1 = length(vec2(n1.x, n1.y * yScale));
+    float k2 = length(vec2(n2.x, n2.y * yScale));
+    float k3 = length(vec2(n3.x, n3.y * yScale));
+
+    float s0 = SEP / max(k0, 1e-3);
+    float s1 = SEP / max(k1, 1e-3);
+    float s2 = SEP / max(k2, 1e-3);
+    float s3 = SEP / max(k3, 1e-3);
+
+    float b0 = smoothstep(s0-aa, s0+aa, d0) * (1.0 - smoothstep(s0+BD-aa, s0+BD+aa, d0));
+    float b1 = smoothstep(s1-aa, s1+aa, d1) * (1.0 - smoothstep(s1+BD-aa, s1+BD+aa, d1));
+    float b2 = smoothstep(s2-aa, s2+aa, d2) * (1.0 - smoothstep(s2+BD-aa, s2+BD+aa, d2));
+    float b3 = smoothstep(s3-aa, s3+aa, d3) * (1.0 - smoothstep(s3+BD-aa, s3+BD+aa, d3));
+
+    float inBd = max(max(b0,b1), max(b2,b3));
     vec3 res = mix(col, vec3(0.0), inBd * fadeAlpha);
     res = mix(vec3(1.0), res, fadeAlpha);
     return mix(res, vec3(1.0), whiteMask);
 }
-vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, vec2 innerUV_raw, float xStart, float xW, float pageSeed,
+vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
                       float timeIndex, float sceneProgress, float animDuration){
 
     manga_initSeed(vec2(pageSeed, 99.1));
@@ -1348,60 +1323,21 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, vec2 innerUV_raw, float xS
     vec4 cb = manga_colBand(colIdx, nc, xStart, xW, cs_row,
                              rb.x, rb.y, rb.z, rb.w);
 
-
-    // =============================
-    // 断ち切り（コマ単位で切替）
-    //   - 通常: 内枠(5%)に収める（内枠外は白）
-    //   - 断ち切り指定のときだけ: その側を画面端まで伸ばす
-    // =============================
+    // 裁ち切り判定: 内枠外ピクセルはコマの辺がページ端に接している場合のみ通す
     float _s3   = min(resolution.x, resolution.y);
-    float INNER = _s3 * 0.05;
-    vec2 fMin3  = vec2(INNER) / resolution;
-    vec2 fMax3  = vec2(1.0) - fMin3;
-    vec2 fSize3 = fMax3 - fMin3;
+    float _inn3 = _s3 * 0.05;
+    vec2 pfMin3 = vec2(_inn3) / resolution;
+    vec2 pfMax3 = vec2(1.0) - pfMin3;
+    float eps   = 0.02;
 
-    // 画面端に対応する innerUV_raw 座標（clamp前）
-    float extL = -fMin3.x / fSize3.x;
-    float extR =  1.0 + fMin3.x / fSize3.x;
-    float extT = -fMin3.y / fSize3.y;
-    float extB =  1.0 + fMin3.y / fSize3.y;
+    if(uv.x < pfMin3.x && min(cb.x, cb.y) > xStart + eps)      return vec3(1.0);
+    if(uv.x > pfMax3.x && max(cb.z, cb.w) < xStart + xW - eps) return vec3(1.0);
+    if(uv.y < pfMin3.y && min(rb.x, rb.y) > eps)                return vec3(1.0);
+    if(uv.y > pfMax3.y && max(rb.z, rb.w) < 1.0 - eps)         return vec3(1.0);
 
-    // 外周かどうか（ワイド時のガター側へは伸ばさない）
-    bool outerLeft  = (abs(xStart - 0.0) < 1e-4);
-    bool outerRight = (abs((xStart + xW) - 1.0) < 1e-4);
-
-    bool isLeftMost  = (colIdx < 0.5);
-    bool isRightMost = (colIdx > (nc - 1.5));
-    bool isTopMost   = (rowIdx < 0.5);
-    bool isBotMost   = (rowIdx > (numRows - 1.5));
-
-    // コマごとに断ち切りフラグ
-    manga_initSeed3(vec3(panelId, timeIndex, 123.4));
-    float pBleed = 0.28; // 断ち切り率（好みで調整）
-    bool bleedL = outerLeft  && isLeftMost  && (manga_random() < pBleed);
-    bool bleedR = outerRight && isRightMost && (manga_random() < pBleed);
-    bool bleedT = isTopMost  && (manga_random() < pBleed);
-    bool bleedB = isBotMost  && (manga_random() < pBleed);
-
-    // 断ち切りしない側の内枠外は白
-    if(uv.x < fMin3.x && !bleedL) return vec3(1.0);
-    if(uv.x > fMax3.x && !bleedR) return vec3(1.0);
-    if(uv.y < fMin3.y && !bleedT) return vec3(1.0);
-    if(uv.y > fMax3.y && !bleedB) return vec3(1.0);
-
-    // 断ち切りする側は、該当辺を「画面端相当のinnerUV_raw」まで拡張
-    vec4 rb2 = rb;
-    vec4 cb2 = cb;
-    if(bleedL){ cb2.x = extL; cb2.y = extL; }
-    if(bleedR){ cb2.z = extR; cb2.w = extR; }
-    if(bleedT){ rb2.x = extT; rb2.y = extT; }
-    if(bleedB){ rb2.z = extB; rb2.w = extB; }
-
-    return manga_renderCell(innerUV_raw, rb2, cb2,
+    return manga_renderCell(innerUV, rb, cb,
                             panelId + pageSeed * 0.01,
-                            timeIndex, sceneProgress, animDuration,
-                            bleedL?1.0:0.0, bleedR?1.0:0.0, bleedT?1.0:0.0, bleedB?1.0:0.0);
-
+                            timeIndex, sceneProgress, animDuration);
 }
 
 
@@ -1421,10 +1357,7 @@ vec3 bg_manga(vec2 fc){
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
     vec2 fMax  = vec2(1.0) - fMin;
     vec2 fSize = fMax - fMin;
-
-    // ★ clamp前の値（内枠外＝断ち切り領域を扱うため保持）
-    vec2 innerUV_raw = (uv - fMin) / fSize;
-    vec2 innerUV     = clamp(innerUV_raw, 0.0, 1.0);
+    vec2 innerUV = clamp((uv - fMin) / fSize, 0.0, 1.0);
 
     float gutterHalf = 8.0 / resolution.x;
 
@@ -1443,17 +1376,17 @@ vec3 bg_manga(vec2 fc){
         float igR = (gutterR - fMin.x) / fSize.x;
 
         if(uv.x < gutterL){
-            return manga_renderPage(fc, uv, innerUV, innerUV_raw, 0.0, igL,
+            return manga_renderPage(fc, uv, innerUV, 0.0, igL,
                                     lSeed, timeIndex, sceneProgress, animDuration);
         } else {
-            return manga_renderPage(fc, uv, innerUV, innerUV_raw, igR, 1.0 - igR,
+            return manga_renderPage(fc, uv, innerUV, igR, 1.0 - igR,
                                     rSeed, timeIndex, sceneProgress, animDuration);
         }
 
     } else {
         manga_initSeed(vec2(timeIndex, 55.3));
         float seed = manga_hash_f(timeIndex * 4.1 + 7.7);
-        return manga_renderPage(fc, uv, innerUV, innerUV_raw, 0.0, 1.0,
+        return manga_renderPage(fc, uv, innerUV, 0.0, 1.0,
                                 seed, timeIndex, sceneProgress, animDuration);
     }
 }
