@@ -988,30 +988,35 @@ float manga_vBndX(float t, float xT, float xB){ return xT + (xB - xT) * t; }
 // row=1: 上=b1, 下=b2
 // row=2: 上=b2, 下=y1
 vec4 manga_rowBand(float rowIdx, float numRows, float pageSeed){
+    // 境界線を「ページ全体を横断する直線」として定義
+    // bnd_i: x=0でのy座標(yL), x=1でのy座標(yR)
+    // row_k: 上辺=境界k, 下辺=境界k+1
     float PROB = 0.55;
-    // 境界1
+
+    // 境界1 (row0の下辺 = row1の上辺)
     float b1c = mix(0.28, 0.52, manga_hash_f(pageSeed + 10.0));
-    float b1L, b1R;
-    if(manga_hash_f(pageSeed + 11.0) < PROB){
-        float s = (manga_hash_f(pageSeed + 12.0) - 0.5) * 0.4;
-        b1L = clamp(b1c - s, 0.12, 0.82);
-        b1R = clamp(b1c + s, 0.12, 0.82);
-    } else { b1L = b1c; b1R = b1c; }
-    // 境界2 (3行のときのみ使用)
-    float b1max = max(b1L, b1R);
-    float b2c = mix(b1max + 0.18, 0.84, manga_hash_f(pageSeed + 20.0));
-    float b2L, b2R;
-    if(manga_hash_f(pageSeed + 21.0) < PROB){
-        float s = (manga_hash_f(pageSeed + 22.0) - 0.5) * 0.4;
-        b2L = clamp(b2c - s, b1L + 0.12, 0.88);
-        b2R = clamp(b2c + s, b1R + 0.12, 0.88);
-    } else { b2L = b2c; b2R = b2c; }
-    if(rowIdx < 0.5)      return vec4(0.0,  0.0,  b1L,  b1R);
-    else if(rowIdx < 1.5) return vec4(b1L,  b1R,  b2L,  b2R);
-    else                  return vec4(b2L,  b2R,  1.0,  1.0);
+    float b1slope = (manga_hash_f(pageSeed + 11.0) < PROB)
+        ? (manga_hash_f(pageSeed + 12.0) - 0.5) * 0.5
+        : 0.0;
+    float b1L = clamp(b1c - b1slope*0.5, 0.12, 0.82);
+    float b1R = clamp(b1c + b1slope*0.5, 0.12, 0.82);
+
+    // 境界2 (row1の下辺 = row2の上辺)
+    // b1の平均より下に配置
+    float b1avg = (b1L + b1R) * 0.5;
+    float b2c = mix(b1avg + 0.18, 0.84, manga_hash_f(pageSeed + 20.0));
+    float b2slope = (manga_hash_f(pageSeed + 21.0) < PROB)
+        ? (manga_hash_f(pageSeed + 22.0) - 0.5) * 0.5
+        : 0.0;
+    float b2L = clamp(b2c - b2slope*0.5, b1L + 0.10, 0.88);
+    float b2R = clamp(b2c + b2slope*0.5, b1R + 0.10, 0.88);
+
+    // rowIdx に対応する上辺・下辺を返す
+    if(rowIdx < 0.5)      return vec4(0.0, 0.0, b1L, b1R);
+    else if(rowIdx < 1.5) return vec4(b1L, b1R, b2L, b2R);
+    else                  return vec4(b2L, b2R, 1.0, 1.0);
 }
 
-// 列境界パラメータ: vec4(c0T,c0B, c1T,c1B) = 左辺・右辺の行上端/行下端でのx
 vec4 manga_colBand(float colIdx, float numCols,
                    float xStart, float xW, float rowSeed,
                    float b0L, float b0R, float b1L, float b1R){
@@ -1020,12 +1025,12 @@ vec4 manga_colBand(float colIdx, float numCols,
     }
     float PROB = 0.45;
     float r = mix(0.30, 0.70, manga_hash_f(rowSeed));
-    float bcT, bcB;
-    if(manga_hash_f(rowSeed + 1.0) < PROB){
-        float s = (manga_hash_f(rowSeed + 2.0) - 0.5) * 0.5;
-        bcT = clamp(xStart + xW * (r - s * 0.5), xStart + xW*0.15, xStart + xW*0.85);
-        bcB = clamp(xStart + xW * (r + s * 0.5), xStart + xW*0.15, xStart + xW*0.85);
-    } else { bcT = xStart + xW * r; bcB = bcT; }
+    float slope = (manga_hash_f(rowSeed + 1.0) < PROB)
+        ? (manga_hash_f(rowSeed + 2.0) - 0.5) * 0.5
+        : 0.0;
+    // 境界のx: 上端(t=0)と下端(t=1)で slope 分ずらす
+    float bcT = clamp(xStart + xW*(r - slope*0.5), xStart+xW*0.15, xStart+xW*0.85);
+    float bcB = clamp(xStart + xW*(r + slope*0.5), xStart+xW*0.15, xStart+xW*0.85);
     if(colIdx < 0.5) return vec4(xStart, xStart, bcT, bcB);
     else             return vec4(bcT, bcB, xStart+xW, xStart+xW);
 }
@@ -1143,8 +1148,8 @@ vec3 manga_renderCell(vec2 fc, vec4 rowBand, vec4 colBand,
     vec2 uv = fc / resolution;
     vec2 innerUV = (uv - fMin) / fSize;
 
-    // コマ内判定
-    bool inside = manga_inQuad(innerUV, P0,P1,P2,P3);
+    // コマ内判定（renderPageがhitを保証するので判定不要）
+    // bool inside = manga_inQuad(innerUV, P0,P1,P2,P3);
 
     // アニメーション
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
@@ -1177,20 +1182,19 @@ vec3 manga_renderCell(vec2 fc, vec4 rowBand, vec4 colBand,
         fadeAlpha = clamp(popEpB, 0.0, 1.0);
     }
 
-    // ポップアップ: スケール後にinside再判定
-    bool aInside = inside;
+    // ポップアップ: スケール後のAABBクリップ（inQuad不要、フェードで表現）
     if(animType >= 1.5){
         vec2 popCenter2 = (P0+P1+P2+P3) * 0.25;
         float popEpB2 = manga_easeOutElastic(prog);
         float popSc2  = clamp(popEpB2, 0.001, 2.0);
-        vec2 sP0 = popCenter2 + (P0-popCenter2)*popSc2;
-        vec2 sP1 = popCenter2 + (P1-popCenter2)*popSc2;
-        vec2 sP2 = popCenter2 + (P2-popCenter2)*popSc2;
-        vec2 sP3 = popCenter2 + (P3-popCenter2)*popSc2;
-        aInside = manga_inQuad(innerUV, sP0,sP1,sP2,sP3);
+        // AABBスケールでクリップ
+        vec2 quadMn = min(min(P0,P1),min(P2,P3));
+        vec2 quadMx = max(max(P0,P1),max(P2,P3));
+        vec2 sMn = popCenter2 + (quadMn - popCenter2)*popSc2;
+        vec2 sMx = popCenter2 + (quadMx - popCenter2)*popSc2;
+        if(innerUV.x < sMn.x || innerUV.x > sMx.x ||
+           innerUV.y < sMn.y || innerUV.y > sMx.y) return vec3(1.0);
     }
-
-    if(!aInside) return vec3(1.0);
 
     // スライドイン: aInnerUVがコマ外なら白
     if(animType >= 0.5 && animType < 1.5){
@@ -1299,14 +1303,12 @@ vec3 bg_manga(vec2 fc){
     float timeIndex    = floor(time / sceneTime);
     float sceneProgress= fract(time / sceneTime);
 
-    // 内枠UV（コマ分割の基準領域）
-    float INNER_X = 80.0;
-    float INNER_Y = 80.0;
+    // 内枠UV（renderCell/renderPageと同じ計算で統一）
+    float INNER_X = min(resolution.x, resolution.y) * 0.05;
+    float INNER_Y = INNER_X;
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
     vec2 fMax  = vec2(1.0) - fMin;
     vec2 fSize = fMax - fMin;
-    // innerUVをクランプ: 内枠外のピクセルも端のコマに帰属させる
-    // （断ち切りコマなら画面端まで描画される）
     vec2 innerUV = clamp((uv - fMin) / fSize, 0.0, 1.0);
 
     float gutterHalf = 8.0 / resolution.x;
