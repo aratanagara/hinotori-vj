@@ -1165,6 +1165,34 @@ vec4 manga_pageHit2(vec2 uv, float xStart, float xW,
 vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
                       float panelId, float timeIndex,
                       float sceneProgress, float animDuration){
+    // ===== DEBUG: 固定色でコマ形状確認 =====
+    float _short = min(resolution.x, resolution.y);
+    float SEP = _short * 0.006;
+    float BD  = _short * 0.0028;
+    float INNER = _short * 0.05;
+    vec2 fSize = vec2(1.0) - 2.0*vec2(INNER)/resolution;
+    vec2 uvRes = fSize * resolution;
+
+    vec2 P0 = manga_quadP0(rowBand.x, rowBand.y, colBand.x);
+    vec2 P1 = manga_quadP1(rowBand.x, rowBand.y, colBand.z);
+    vec2 P2 = manga_quadP2(rowBand.z, rowBand.w, colBand.w);
+    vec2 P3 = manga_quadP3(rowBand.z, rowBand.w, colBand.y);
+
+    float dist = manga_quadDist(innerUV, P0,P1,P2,P3, uvRes);
+    float aa = 0.8;
+    float inSep = 1.0 - smoothstep(SEP-aa, SEP+aa, dist);
+    float inBd  = smoothstep(SEP-aa,SEP+aa,dist)*(1.0-smoothstep(SEP+BD-aa,SEP+BD+aa,dist));
+
+    if(inSep > 0.5) return vec3(1.0);  // 余白
+
+    // panelIdで色分け
+    float hue = fract(panelId * 0.137 + 0.1);
+    vec3 col = 0.5 + 0.5*cos(vec3(0,2,4) + hue * 6.28);
+    col = mix(col, vec3(0.0), inBd);
+    return col;
+
+    // ===== DEBUG END =====
+    float DUMMY_SKIP = 0.0;
     float _short = min(resolution.x, resolution.y);
     float SEP    = _short * 0.006;
     float BD     = _short * 0.0028;
