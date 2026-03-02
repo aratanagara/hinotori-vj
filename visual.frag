@@ -998,15 +998,16 @@ vec4 manga_rowBand(float rowIdx, float numRows, float pageSeed){
     }
 
     // 境界2 (行1と行2の間) — numRows==2のとき不要
-    float b2_base = mix(0.55, 0.80, manga_hash_f(pageSeed + 20.0));
+    // b1より最低0.12下、かつ最大0.88に収める
+    float b1max = max(b1L, b1R);
+    float b2_base = mix(b1max + 0.15, 0.82, manga_hash_f(pageSeed + 20.0));
     float b2L, b2R;
     if(manga_hash_f(pageSeed + 21.0) < SLOPE_PROB){
         float slope = (manga_hash_f(pageSeed + 22.0) - 0.5) * 0.35;
-        b2L = clamp(b2_base - slope * 0.5, b1L + 0.08, 0.92);
-        b2R = clamp(b2_base + slope * 0.5, b1R + 0.08, 0.92);
+        b2L = clamp(b2_base - slope * 0.5, b1L + 0.10, 0.88);
+        b2R = clamp(b2_base + slope * 0.5, b1R + 0.10, 0.88);
     } else {
-        float bm = max(b1L, b1R) + 0.12;
-        b2L = max(b2_base, bm); b2R = max(b2_base, bm);
+        b2L = b2_base; b2R = b2_base;
     }
 
     // rowIdx の上辺・下辺
@@ -1294,12 +1295,20 @@ vec3 manga_renderCell(vec2 fc, vec4 rowBand, vec4 colBand,
 
     float mSep = SEP;
     float mBD  = BD;
-    bool inSep = (dist < mSep);
-    bool isBd  = !inSep && (dist < mSep + mBD);
+    // AA付き枠線 (dist = コマ内側へのpx距離、正=内側)
+    float aa = 1.0; // ぼかし幅(px)
+    // コマ輪郭AA: dist=0でフェード
+    float edgeAA  = smoothstep(-aa, aa, dist);
+    // SEP: dist < mSep で白
+    float inSepAA = 1.0 - smoothstep(mSep - aa, mSep + aa, dist);
+    // BD: dist in [mSep, mSep+mBD] で黒
+    float inBdAA  = smoothstep(mSep - aa, mSep + aa, dist)
+                  * (1.0 - smoothstep(mSep + mBD - aa, mSep + mBD + aa, dist));
 
-    if(inSep) return vec3(1.0);
-    if(isBd)  return mix(vec3(1.0), vec3(0.0), fadeAlpha);
-    return mix(vec3(1.0), col, fadeAlpha);
+    vec3 result = col;
+    result = mix(result, vec3(0.0), inBdAA * fadeAlpha);
+    result = mix(result, vec3(1.0), inSepAA);
+    return mix(vec3(1.0), result, edgeAA * fadeAlpha);
 }
 
 
