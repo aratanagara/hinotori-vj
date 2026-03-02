@@ -86,7 +86,7 @@ float hash21(vec2 p){
 }
 
 float hash11(float p) {
-  p = fract(p * 0.1031);
+  p = fract(p * 0.0531);
   p *= p + 33.33;
   p *= p + p;
   return fract(p);
@@ -745,7 +745,7 @@ vec3 bg_newSinFract(vec2 fc){
 // 7) cos 20 loop
 vec3 bg_cos20(vec2 fc){
   float bt = getBeat();
-  float tBase = randomMoveTime(bt, TAU * 0.10, 701.0);
+  float tBase = randomMoveTime(bt, TAU * 0.05, 701.0);
   float tUVx  = randomMoveTime(bt, TAU * 0.06, 702.0);
   float tUVy  = randomMoveTime(bt, TAU * 0.05, 703.0);
   vec3 col = vec3(0.0);
@@ -1065,12 +1065,13 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     // isBleed=1: 内枠外周辺を画面端まで拡張（断ち切り）
 
     // ---- 定数 ----
-    // INNER_X/Y は bg_manga・manga_renderPage と同じ 80px に統一
-    float INNER_X = 80.0;  // 内枠 左右余白 px
-    float INNER_Y = 80.0;  // 内枠 上下余白 px
-    float SEP_X   =  6.0;  // コマ間 横余白 px（片側）→ 視覚的間隔: SEP_X*2+BD*2
-    float SEP_Y   = 24.0;  // コマ間 縦余白 px（片側）→ 視覚的間隔: SEP_Y*2+BD*2
-    float BD      =  3.0;  // 枠線の太さ px
+    // INNER_X/Y は短辺の5%（80px@1600p相当）で画面サイズに追従
+    float INNER_X = min(resolution.x, resolution.y) * 0.05;
+    float INNER_Y = INNER_X;
+    float _short  = min(resolution.x, resolution.y);
+    float SEP_X   = _short * 0.0056;  // コマ間 横余白 px（片側）
+    float SEP_Y   = _short * 0.022;   // コマ間 縦余白 px（片側）
+    float BD      = _short * 0.0028;  // 枠線の太さ px
 
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
     vec2 fMax  = vec2(1.0) - fMin;
@@ -1188,7 +1189,8 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
                       float timeIndex, float sceneProgress, float animDuration){
     // 内枠パラメータ（manga_renderCellと同じ値）
-    vec2 pfMin = vec2(80.0, 80.0) / resolution;
+    float pfInnerPx = min(resolution.x, resolution.y) * 0.05;
+    vec2 pfMin = vec2(pfInnerPx, pfInnerPx) / resolution;
     vec2 pfMax = vec2(1.0) - pfMin;
 
     manga_initSeed(vec2(pageSeed, 99.1));
@@ -1232,8 +1234,8 @@ vec3 bg_manga(vec2 fc){
     float sceneProgress= fract(time / sceneTime);
 
     // 内枠UV（コマ分割の基準領域）
-    float INNER_X = 80.0;
-    float INNER_Y = 80.0;
+    float INNER_X = min(resolution.x, resolution.y) * 0.05;
+    float INNER_Y = INNER_X;
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
     vec2 fMax  = vec2(1.0) - fMin;
     vec2 fSize = fMax - fMin;
@@ -1315,7 +1317,7 @@ float luma709(vec3 c){
 vec3 applyTwoColor(vec3 c, vec3 c0, vec3 c1, vec2 fc){
   float l = luma709(c);
   float d = bayer4(fc);
-  float t = 0.5 + (d - 0.5) * 0.10;
+  float t = 0.5 + (d - 0.5) * 0.05;
   float k = step(t, l);
   return mix(c0, c1, k);
 }
