@@ -1012,8 +1012,12 @@ vec4 manga_rowBand(float rowIdx, float numRows, float pageSeed){
     float b2R = clamp(b2c + b2slope*0.5, b1R + 0.10, 0.88);
 
     // rowIdx に対応する上辺・下辺を返す
+    // numRows=2: row0=0..b1, row1=b1..1.0
+    // numRows=3: row0=0..b1, row1=b1..b2, row2=b2..1.0
     if(rowIdx < 0.5)      return vec4(0.0, 0.0, b1L, b1R);
-    else if(rowIdx < 1.5) return vec4(b1L, b1R, b2L, b2R);
+    else if(rowIdx < 1.5) return vec4(b1L, b1R,
+        (numRows < 2.5) ? 1.0 : b2L,
+        (numRows < 2.5) ? 1.0 : b2R);
     else                  return vec4(b2L, b2R, 1.0, 1.0);
 }
 
