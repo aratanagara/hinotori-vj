@@ -1097,7 +1097,7 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     float scrR = isBleed * atR;
     float scrT = isBleed * atT;
     float scrB = isBleed * atB;
-    // edg: 内枠端に接している辺 → SEPだけ消す（枠線は残す）
+    // edg: 内枠端 → SEPだけ消す（枠線は残す）
     float edgL = atL;
     float edgR = atR;
     float edgT = atT;
@@ -1190,8 +1190,201 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     return mix(vec3(1.0), col, fadeAlpha);
 }
 
+
+// ================================================================
+// 斜めコマレイアウト (Diagonal panel layout)
+//
+// アルゴリズム:
+//   N本の直線でページを分割。各ピクセルが各直線の左/右どちら側か
+//   のビット列(0/1)でコマIDを決定する。
+//   直線は innerUV空間(0..1)で定義。
+// ================================================================
+
+// 直線の符号付き距離（点pが直線の「左」なら正、「右」なら負）
+// 直線はページを横断: x=0..1 上の2点 (0, y0), (1, y1) を通る
+float manga_diagSide(vec2 p, float y0, float y1){
+    // 方向ベクトル d = (1, y1-y0), 法線 n = (-(y1-y0), 1) を正規化
+    float dy = y1 - y0;
+    vec2 n = normalize(vec2(-dy, 1.0));
+    float offset = dot(n, vec2(0.0, y0));
+    return dot(n, p) - offset;
+}
+
+// 直線までのピクセル距離（px単位）
+float manga_diagDist(vec2 uvPos, float y0, float y1, vec2 res, vec2 fSize){
+    float dy = y1 - y0;
+    vec2 n = normalize(vec2(-dy, 1.0));
+    // UV→px スケール（fSizeで内枠内UV→解像度に変換）
+    vec2 scale = fSize * res;
+    vec2 nPx = normalize(n * scale);
+    float offset = dot(n, vec2(0.0, y0));
+    float distUV = abs(dot(n, uvPos) - offset);
+    // ピクセル距離に変換
+    return distUV * length(n * scale) / length(n);
+}
+
+// 斜めページのコマID取得 (0〜7、-1=未ヒットはない)
+// 直線数 nLines (2〜4)、各直線の y0/y1 はseedから生成
+float manga_diagId(vec2 innerUV, float pageSeed, float nLines,
+                   float ly00, float ly01,
+                   float ly10, float ly11,
+                   float ly20, float ly21,
+                   float ly30, float ly31){
+    float id = 0.0;
+    float bit = 1.0;
+    if(nLines > 0.5){
+        id += (manga_diagSide(innerUV, ly00, ly01) > 0.0 ? bit : 0.0);
+        bit *= 2.0;
+    }
+    if(nLines > 1.5){
+        id += (manga_diagSide(innerUV, ly10, ly11) > 0.0 ? bit : 0.0);
+        bit *= 2.0;
+    }
+    if(nLines > 2.5){
+        id += (manga_diagSide(innerUV, ly20, ly21) > 0.0 ? bit : 0.0);
+        bit *= 2.0;
+    }
+    if(nLines > 3.5){
+        id += (manga_diagSide(innerUV, ly30, ly31) > 0.0 ? bit : 0.0);
+    }
+    return id;
+}
+
+// 各直線への最小ピクセル距離
+float manga_diagMinDist(vec2 innerUV, float nLines,
+                        float ly00, float ly01,
+                        float ly10, float ly11,
+                        float ly20, float ly21,
+                        float ly30, float ly31,
+                        vec2 res, vec2 fSize){
+    float d = 1e9;
+    if(nLines > 0.5) d = min(d, manga_diagDist(innerUV, ly00, ly01, res, fSize));
+    if(nLines > 1.5) d = min(d, manga_diagDist(innerUV, ly10, ly11, res, fSize));
+    if(nLines > 2.5) d = min(d, manga_diagDist(innerUV, ly20, ly21, res, fSize));
+    if(nLines > 3.5) d = min(d, manga_diagDist(innerUV, ly30, ly31, res, fSize));
+    return d;
+}
+
+vec3 manga_renderDiagPage(vec2 fc, vec2 uv, vec2 innerUV,
+                          float pageSeed, float timeIndex,
+                          float sceneProgress, float animDuration){
+
+    float _short  = min(resolution.x, resolution.y);
+    float INNER_X = _short * 0.05;
+    float INNER_Y = INNER_X;
+    float SEP_D   = _short * 0.006;  // 斜め線の余白（片側px）
+    float BD      = _short * 0.0028; // 枠線の太さ
+
+    vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
+    vec2 fMax  = vec2(1.0) - fMin;
+    vec2 fSize = fMax - fMin;
+
+    // 内枠外は白
+    if(uv.x < fMin.x || uv.x > fMax.x ||
+       uv.y < fMin.y || uv.y > fMax.y) return vec3(1.0);
+
+    // ページのseedから直線数と各直線のy0/y1を生成
+    manga_initSeed(vec2(pageSeed, 77.3));
+    float nLines = floor(manga_random() * 3.0) + 2.0; // 2〜4本
+
+    // 各直線: y0は左端(x=0)のy座標, y1は右端(x=1)のy座標
+    // 中央付近(0.2〜0.8)に収め、傾きを持たせる
+    float ly00 = mix(0.15, 0.85, manga_random());
+    float slope0 = (manga_random() - 0.5) * 0.8;
+    float ly01 = clamp(ly00 + slope0, 0.05, 0.95);
+
+    float ly10 = mix(0.15, 0.85, manga_random());
+    float slope1 = (manga_random() - 0.5) * 0.8;
+    float ly11 = clamp(ly10 + slope1, 0.05, 0.95);
+
+    float ly20 = mix(0.15, 0.85, manga_random());
+    float slope2 = (manga_random() - 0.5) * 0.8;
+    float ly21 = clamp(ly20 + slope2, 0.05, 0.95);
+
+    float ly30 = mix(0.15, 0.85, manga_random());
+    float slope3 = (manga_random() - 0.5) * 0.8;
+    float ly31 = clamp(ly30 + slope3, 0.05, 0.95);
+
+    // このピクセルのコマID
+    float panelId = manga_diagId(innerUV, pageSeed, nLines,
+                                 ly00, ly01, ly10, ly11,
+                                 ly20, ly21, ly30, ly31);
+
+    // コマのAABB（コンテンツUV用に近似中心を使う）
+    // 各コマの「代表点」を使って中心を推定
+    // 簡易的にページ全体のUVをそのまま使う
+    vec2 cellCenter = vec2(0.5); // 近似（後でコンテンツ用に使う）
+
+    // アニメーション
+    float uniqueId = panelId + pageSeed * 0.01;
+    manga_initSeed3(vec3(uniqueId, timeIndex, 7.7));
+    float cellDelay = manga_random() * 0.25;
+    float prog = clamp((sceneProgress - cellDelay) / animDuration, 0.0, 1.0);
+    float ep   = manga_easeOutQuint(prog);
+    float animType = floor(manga_random() * 2.0); // 斜めコマは 0=フェード 1=スライド
+
+    float fadeAlpha = 1.0;
+    vec2 aInnerUV = innerUV;
+
+    if(animType < 0.5){
+        fadeAlpha = ep;
+    } else {
+        // スライドイン: 斜め線の法線方向にずらす
+        manga_initSeed3(vec3(uniqueId, timeIndex, 8.8));
+        float dr = manga_random();
+        vec2 slideDir;
+        if(dr < 0.25)      slideDir = vec2(-1.0,  0.0);
+        else if(dr < 0.5)  slideDir = vec2( 1.0,  0.0);
+        else if(dr < 0.75) slideDir = vec2( 0.0, -1.0);
+        else               slideDir = vec2( 0.0,  1.0);
+        aInnerUV = innerUV - slideDir * (1.0 - ep) * 0.3;
+    }
+
+    // スライド後のIDがこのコマと違えば白（コマがまだ来ていない）
+    float aId = manga_diagId(aInnerUV, pageSeed, nLines,
+                             ly00, ly01, ly10, ly11,
+                             ly20, ly21, ly30, ly31);
+    if(animType >= 0.5 && aId != panelId) return vec3(1.0);
+
+    // コンテンツ描画
+    manga_initSeed3(vec3(uniqueId, timeIndex, 13.3));
+    vec3 col = manga_mainAgg(innerUV, manga_random(), time);
+
+    // 枠線: 各直線へのpx距離の最小値で判定
+    float minDist = manga_diagMinDist(innerUV, nLines,
+                                     ly00, ly01, ly10, ly11,
+                                     ly20, ly21, ly30, ly31,
+                                     resolution, fSize);
+
+    // 内枠端（上下左右）への距離も追加
+    float pxInnerUV_x = innerUV.x * fSize.x * resolution.x;
+    float pxInnerUV_y = innerUV.y * fSize.y * resolution.y;
+    float dEdgeL = pxInnerUV_x;
+    float dEdgeR = fSize.x * resolution.x - pxInnerUV_x;
+    float dEdgeT = pxInnerUV_y;
+    float dEdgeB = fSize.y * resolution.y - pxInnerUV_y;
+    float edgeDist = min(min(dEdgeL, dEdgeR), min(dEdgeT, dEdgeB));
+
+    bool inSep = (minDist < SEP_D);
+    bool inBd  = !inSep && (minDist < SEP_D + BD);
+    // 内枠端の枠線
+    bool inEdgeBd = !inSep && (edgeDist < BD);
+
+    if(inSep) return vec3(1.0);
+    if(inBd || inEdgeBd) return mix(vec3(1.0), vec3(0.0), fadeAlpha);
+    return mix(vec3(1.0), col, fadeAlpha);
+}
+
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
                       float timeIndex, float sceneProgress, float animDuration){
+
+    // 約30%の確率で斜めコマレイアウトに切り替え
+    manga_initSeed(vec2(pageSeed, 55.9));
+    if(manga_random() < 0.30){
+        return manga_renderDiagPage(fc, uv, innerUV, pageSeed,
+                                    timeIndex, sceneProgress, animDuration);
+    }
+
     // 内枠パラメータ（manga_renderCellと同じ値）
     float pfInnerPx = min(resolution.x, resolution.y) * 0.05;
     vec2 pfMin = vec2(pfInnerPx, pfInnerPx) / resolution;
