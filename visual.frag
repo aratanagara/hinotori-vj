@@ -1160,50 +1160,22 @@ vec4 manga_pageHit2(vec2 uv, float xStart, float xW,
     return result;
 }
 
-vec3 manga_renderCell(vec2 fc, vec2 innerUV, vec4 rowBand, vec4 colBand,
+vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
                       float panelId, float timeIndex,
-                      float sceneProgress, float animDuration,
-                      float isBleed){
-    float _short  = min(resolution.x, resolution.y);
-    float INNER_X = _short * 0.05;
-    float INNER_Y = INNER_X;
-    float SEP     = _short * 0.006;
-    float BD      = _short * 0.0028;
+                      float sceneProgress, float animDuration){
+    float _short = min(resolution.x, resolution.y);
+    float SEP    = _short * 0.006;
+    float BD     = _short * 0.0028;
 
-    vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
-    vec2 fMax  = vec2(1.0) - fMin;
-    vec2 fSize = fMax - fMin;
-    vec2 uvRes = fSize * resolution;
+    // innerUV空間(0..1)での頂点
+    vec2 P0 = manga_quadP0(rowBand.x, rowBand.y, colBand.x);
+    vec2 P1 = manga_quadP1(rowBand.x, rowBand.y, colBand.z);
+    vec2 P2 = manga_quadP2(rowBand.z, rowBand.w, colBand.w);
+    vec2 P3 = manga_quadP3(rowBand.z, rowBand.w, colBand.y);
 
-    float topL  = rowBand.x; float topR  = rowBand.y;
-    float btmL  = rowBand.z; float btmR  = rowBand.w;
-    float leftT = colBand.x; float leftB = colBand.y;
-    float rightT= colBand.z; float rightB= colBand.w;
-
-    // 断ち切り判定
-    float atL = step(min(leftT,leftB), 0.004);
-    float atR = step(0.996, max(rightT,rightB));
-    float atT = step(min(topL,topR),   0.004);
-    float atB = step(0.996, max(btmL,btmR));
-    float scrL = isBleed*atL; float scrR = isBleed*atR;
-    float scrT = isBleed*atT; float scrB = isBleed*atB;
-
-    // 断ち切り拡張
-    if(scrL > 0.5){ leftT  = -fMin.x/fSize.x; leftB  = leftT; }
-    if(scrR > 0.5){ rightT = fMax.x/fSize.x + fMin.x/fSize.x; rightB = rightT; }
-    if(scrT > 0.5){ topL   = -fMin.y/fSize.y; topR   = topL; }
-    if(scrB > 0.5){ btmL   = fMax.y/fSize.y + fMin.y/fSize.y; btmR   = btmL; }
-
-    // 4頂点
-    vec2 P0 = manga_quadP0(topL,topR,leftT);
-    vec2 P1 = manga_quadP1(topL,topR,rightT);
-    vec2 P2 = manga_quadP2(btmL,btmR,rightB);
-    vec2 P3 = manga_quadP3(btmL,btmR,leftB);
-
-    // innerUVは引数として受け取る（pageHit2と同じ座標系）
-
-    // コマ外は白
+    // コマ内チェック（pageHit2が保証するはずだが念のため）
     if(!manga_inQuad(innerUV, P0,P1,P2,P3)) return vec3(1.0);
+
     // アニメーション
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
     float cellDelay = manga_random() * 0.3;
@@ -1211,57 +1183,55 @@ vec3 manga_renderCell(vec2 fc, vec2 innerUV, vec4 rowBand, vec4 colBand,
     float ep   = manga_easeOutQuint(prog);
     float animType = floor(manga_random() * 3.0);
 
-    // コンテンツUV
-    vec2 quadMin = min(min(P0,P1),min(P2,P3));
-    vec2 quadMax = max(max(P0,P1),max(P2,P3));
-    manga_initSeed3(vec3(panelId, timeIndex, 13.3));
-    vec3 col = manga_mainAgg(
-        clamp((innerUV - quadMin) / max(quadMax-quadMin, vec2(0.001)), 0.0, 1.0),
-        manga_random(), time);
+    float fadeAlpha = 1.0;
+    vec2 aUV = innerUV;
 
-    // フェードイン
-    float fadeAlpha = (animType < 0.5) ? ep : 1.0;
-
-    // スライドイン: aInnerUVをずらしてコマ外なら白
-    if(animType >= 0.5 && animType < 1.5){
+    if(animType < 0.5){
+        // フェードイン
+        fadeAlpha = ep;
+    } else if(animType < 1.5){
+        // スライドイン
         manga_initSeed3(vec3(panelId, timeIndex, 9.1));
         float dr = manga_random();
-        vec2 slideDir = vec2(-1.0, 0.0);
-        if(dr < 0.25) slideDir = vec2(-1.0, 0.0);
-        else if(dr < 0.5) slideDir = vec2(1.0, 0.0);
-        else if(dr < 0.75) slideDir = vec2(0.0, -1.0);
-        else               slideDir = vec2(0.0, 1.0);
-        vec2 aUV = innerUV - slideDir*(1.0-ep)*0.4;
+        vec2 sd = (dr<0.25) ? vec2(-1.0,0.0) : (dr<0.5) ? vec2(1.0,0.0) :
+                  (dr<0.75) ? vec2(0.0,-1.0) : vec2(0.0,1.0);
+        aUV = innerUV - sd*(1.0-ep)*0.4;
         if(!manga_inQuad(aUV, P0,P1,P2,P3)) return vec3(1.0);
-        col = manga_mainAgg(
-            clamp((aUV - quadMin)/max(quadMax-quadMin,vec2(0.001)),0.0,1.0),
-            manga_random(), time);
-    }
-
-    // ポップアップ: AABBスケールでクリップ
-    if(animType >= 1.5){
-        float epB  = manga_easeOutElastic(prog);
-        float popSc = max(epB, 0.001);
-        vec2 ctr = (P0+P1+P2+P3)*0.25;
-        vec2 sMn = ctr + (quadMin-ctr)*popSc;
-        vec2 sMx = ctr + (quadMax-ctr)*popSc;
-        if(innerUV.x < sMn.x || innerUV.x > sMx.x ||
-           innerUV.y < sMn.y || innerUV.y > sMx.y) return vec3(1.0);
+    } else {
+        // ポップアップ
+        float epB = manga_easeOutElastic(prog);
+        float sc  = max(epB, 0.001);
+        vec2 ctr  = (P0+P1+P2+P3)*0.25;
+        vec2 mn   = ctr + (min(min(P0,P1),min(P2,P3))-ctr)*sc;
+        vec2 mx   = ctr + (max(max(P0,P1),max(P2,P3))-ctr)*sc;
+        if(innerUV.x<mn.x||innerUV.x>mx.x||innerUV.y<mn.y||innerUV.y>mx.y)
+            return vec3(1.0);
         fadeAlpha = clamp(epB, 0.0, 1.0);
     }
 
-    // 枠線（AA付き）
+    // コンテンツ
+    vec2 qMin = min(min(P0,P1),min(P2,P3));
+    vec2 qMax = max(max(P0,P1),max(P2,P3));
+    manga_initSeed3(vec3(panelId, timeIndex, 13.3));
+    vec3 col = manga_mainAgg(
+        clamp((aUV-qMin)/max(qMax-qMin,vec2(0.001)),0.0,1.0),
+        manga_random(), time);
+
+    // 枠線（innerUV空間のuvResでpx換算）
+    float _short2 = min(resolution.x, resolution.y);
+    float INNER   = _short2 * 0.05;
+    vec2 fSize    = vec2(1.0) - 2.0*vec2(INNER)/resolution;
+    vec2 uvRes    = fSize * resolution;
+
     float dist = manga_quadDist(innerUV, P0,P1,P2,P3, uvRes);
-    float aa = 1.0;
+    float aa   = 0.8;
     float inSep = 1.0 - smoothstep(SEP-aa, SEP+aa, dist);
-    float inBd  = smoothstep(SEP-aa, SEP+aa, dist)
-                * (1.0-smoothstep(SEP+BD-aa, SEP+BD+aa, dist));
+    float inBd  = smoothstep(SEP-aa,SEP+aa,dist)*(1.0-smoothstep(SEP+BD-aa,SEP+BD+aa,dist));
 
     if(inSep > 0.5) return vec3(1.0);
-    vec3 result = mix(col, vec3(0.0), inBd*fadeAlpha);
-    return mix(vec3(1.0), result, fadeAlpha);
+    vec3 res = mix(col, vec3(0.0), inBd*fadeAlpha);
+    return mix(vec3(1.0), res, fadeAlpha);
 }
-
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
                       float timeIndex, float sceneProgress, float animDuration){
 
@@ -1319,9 +1289,9 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
         if(!(okL && okR && okT && okB)) return vec3(1.0);
     }
 
-    return manga_renderCell(fc, innerUV, rb, cb,
+    return manga_renderCell(innerUV, rb, cb,
                             panelId + pageSeed * 0.01,
-                            timeIndex, sceneProgress, animDuration, isBleed);
+                            timeIndex, sceneProgress, animDuration);
 }
 
 
