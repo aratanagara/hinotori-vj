@@ -1165,7 +1165,7 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
                       float sceneProgress, float animDuration){
     float _short = min(resolution.x, resolution.y);
     float SEP    = _short * 0.006;
-    float BD     = _short * 0.0028;
+    float BD     = _short * 0.0028 + 1.0;
 
     // innerUV空間(0..1)での頂点
     vec2 P0 = manga_quadP0(rowBand.x, rowBand.y, colBand.x);
@@ -1260,17 +1260,29 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     vec4 cb = manga_colBand(colIdx, nc, xStart, xW, cs_row,
                              rb.x, rb.y, rb.z, rb.w);
 
-    // 裁ち切り判定: 内枠外ピクセルはコマの辺がページ端に接している場合のみ通す
+    // 裁ち切り判定（断ち切りコマ復活）
+    // 内枠外ピクセルは「そのコマがページ端に触れている側」だけ通す（頂点ベースで安定判定）
     float _s3   = min(resolution.x, resolution.y);
     float _inn3 = _s3 * 0.05;
     vec2 pfMin3 = vec2(_inn3) / resolution;
     vec2 pfMax3 = vec2(1.0) - pfMin3;
-    float eps   = 0.02;
 
-    if(uv.x < pfMin3.x && min(cb.x, cb.y) > xStart + eps)      return vec3(1.0);
-    if(uv.x > pfMax3.x && max(cb.z, cb.w) < xStart + xW - eps) return vec3(1.0);
-    if(uv.y < pfMin3.y && min(rb.x, rb.y) > eps)                return vec3(1.0);
-    if(uv.y > pfMax3.y && max(rb.z, rb.w) < 1.0 - eps)         return vec3(1.0);
+    // innerUV空間(0..1)でのコマ頂点
+    vec2 P0 = manga_quadP0(rb.x, rb.y, cb.x); // 左上
+    vec2 P1 = manga_quadP1(rb.x, rb.y, cb.z); // 右上
+    vec2 P2 = manga_quadP2(rb.z, rb.w, cb.w); // 右下
+    vec2 P3 = manga_quadP3(rb.z, rb.w, cb.y); // 左下
+
+    float eps = 0.001;
+    bool touchLeft   = min(min(P0.x, P3.x), min(P1.x, P2.x)) < eps;
+    bool touchRight  = max(max(P0.x, P3.x), max(P1.x, P2.x)) > 1.0 - eps;
+    bool touchTop    = min(min(P0.y, P1.y), min(P2.y, P3.y)) < eps;
+    bool touchBottom = max(max(P0.y, P1.y), max(P2.y, P3.y)) > 1.0 - eps;
+
+    if(!touchLeft   && uv.x < pfMin3.x) return vec3(1.0);
+    if(!touchRight  && uv.x > pfMax3.x) return vec3(1.0);
+    if(!touchTop    && uv.y < pfMin3.y) return vec3(1.0);
+    if(!touchBottom && uv.y > pfMax3.y) return vec3(1.0);
 
     return manga_renderCell(innerUV, rb, cb,
                             panelId + pageSeed * 0.01,
