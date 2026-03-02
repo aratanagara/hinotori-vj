@@ -1253,7 +1253,7 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
     float yScale = 0.25;  // 水平ガターの“高さ”を4倍
     float aa   = 1.0;     // AAは1px
     float BDpx = 4.0;     // 枠線厚 3〜4px → 4px
-    float offPx = 2.0;    // 枠線位置をガター側へ 2px
+    float offPx = 3.0;    // 枠線位置をガター側へ 2px
 
     if(animType >= 1.5){
         float epB = manga_easeOutElastic(prog);
@@ -1362,8 +1362,8 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     vec2 pfMax3 = vec2(1.0) - pfMin3;
     float eps   = 0.02;
 
-    if(uv.x < pfMin3.x && min(cb.x, cb.y) > xStart + eps)      return vec3(1.0);
-    if(uv.x > pfMax3.x && max(cb.z, cb.w) < xStart + xW - eps) return vec3(1.0);
+    if(uv.x < pfMin3.x && min(cb.x, cb.y) > eps)      return vec3(1.0);
+    if(uv.x > pfMax3.x && max(cb.z, cb.w) < 1.0 - eps) return vec3(1.0);
     if(uv.y < pfMin3.y && min(rb.x, rb.y) > eps)                return vec3(1.0);
     if(uv.y > pfMax3.y && max(rb.z, rb.w) < 1.0 - eps)         return vec3(1.0);
 
