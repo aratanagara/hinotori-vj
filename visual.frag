@@ -772,7 +772,7 @@ vec3 bg_inkelly(vec2 fc){
   float bt = getBeat();
   float ph = isFree() ? fract(bt * 0.25) : fract(bt);
   float ease = easeOutQuint(ph);
-  vec2 uv = fc / resolution;
+  vec2 uv = (fc - vec2(0.5)) / resolution;
   vec2 uvm = uvCover(uv, resolution, texSize);
   float mask = 0.0;
   if(uvm.x>=0.0 && uvm.x<=1.0 && uvm.y>=0.0 && uvm.y<=1.0){
@@ -1173,7 +1173,7 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
                       float sceneProgress, float animDuration){
     float _short = min(resolution.x, resolution.y);
     float SEP    = _short * 0.006;
-    float BD     = _short * 0.0028;
+    float BD = 4.0;
 
     // innerUV空間(0..1)での頂点
     vec2 P0 = manga_quadP0(rowBand.x, rowBand.y, colBand.x);
@@ -1343,7 +1343,7 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
 
 vec3 bg_manga(vec2 fc){
     fc.y = resolution.y - fc.y;
-    vec2 uv = fc / resolution;
+    vec2 uv = (fc - vec2(0.5)) / resolution;
     bool isWide = (resolution.x / resolution.y) > 1.15;
 
     float sceneTime    = 3.5;
@@ -1401,7 +1401,7 @@ vec3 getBackground(vec2 fc){
   if(bgMode==7) return bg_cos20(fc);
   if(bgMode==8) return bg_manga(fc);
   if(bgMode==9){
-    vec2 uv = fc / resolution;
+    vec2 uv = (fc - vec2(0.5)) / resolution;
     float z = max(0.001, bgZoom);
 
     // camera offset in texture UV space
