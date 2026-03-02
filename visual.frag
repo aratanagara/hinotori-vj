@@ -1283,7 +1283,9 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
 
     vec4 hit = manga_pageHit2(innerUV, xStart, xW, numRows, pageSeed,
                                cols0, cs0, cols1, cs1, cols2, cs2);
-    if(hit.w < 0.5) return vec3(1.0); // 未ヒット
+    // DEBUG: hitした=緑, 未ヒット=赤
+    if(hit.w < 0.5) return vec3(1.0, 0.0, 0.0);
+    return vec3(0.0, hit.x * 0.3 + 0.2, hit.y * 0.4 + 0.1); // DEBUG row/col色
 
     float rowIdx = hit.x;
     float colIdx = hit.y;
@@ -1327,7 +1329,6 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
 
 
 vec3 bg_manga(vec2 fc){
-    return vec3(1.0, 0.0, 0.0); // DEBUG
     fc.y = resolution.y - fc.y;
     vec2 uv = fc / resolution;
     bool isWide = (resolution.x / resolution.y) > 1.15;
