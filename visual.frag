@@ -1296,9 +1296,11 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
              * (1.0 - smoothstep((s3+BD*0.5)-aa, (s3+BD*0.5)+aa, d3));
 
     float inBd = max(max(b0,b1), max(b2,b3));
-    vec3 res = mix(col, vec3(0.0), inBd * fadeAlpha);
-    res = mix(vec3(1.0), res, fadeAlpha);
-    return mix(res, vec3(1.0), whiteMask);
+    // 先に“コマ内容→白”を作り、その上に枠線を重ねる（白マスクで枠線が消えないように）
+    vec3 res = mix(vec3(1.0), col, fadeAlpha);          // コンテンツ（フェード）
+    res = mix(res, vec3(1.0), whiteMask);               // ガターを白へ（※まだ枠線は載せない）
+    res = mix(res, vec3(0.0), inBd * fadeAlpha);        // 枠線を最終合成（ガター側にも出る）
+    return res;
 }
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
                       float timeIndex, float sceneProgress, float animDuration){
