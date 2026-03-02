@@ -1065,7 +1065,6 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     // isBleed=1: 内枠外周辺を画面端まで拡張（断ち切り）
 
     // ---- 定数 ----
-    // INNER_X/Y は短辺の5%で画面サイズに追従
     float INNER_X = min(resolution.x, resolution.y) * 0.05;
     float INNER_Y = INNER_X;
     float _short  = min(resolution.x, resolution.y);
@@ -1093,11 +1092,16 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     sMin.y = mix(sMin.y, 0.0, isBleed * atT);
     sMax.y = mix(sMax.y, 1.0, isBleed * atB);
 
-    // scr: 内枠端に接している辺はSEPを付けない（断ち切り有無にかかわらず）
-    float scrL = atL;
-    float scrR = atR;
-    float scrT = atT;
-    float scrB = atB;
+    // scr: 断ち切りかつ内枠端 → BD(枠線)も消す
+    float scrL = isBleed * atL;
+    float scrR = isBleed * atR;
+    float scrT = isBleed * atT;
+    float scrB = isBleed * atB;
+    // edg: 内枠端に接している辺 → SEP(余白)だけ消す（断ち切り有無にかかわらず）
+    float edgL = atL;
+    float edgR = atR;
+    float edgT = atT;
+    float edgB = atB;
 
     vec2 uv = fc / resolution;
 
@@ -1168,10 +1172,10 @@ vec3 manga_renderCell(vec2 fc, vec4 cell, float panelId, float timeIndex,
     // ポップアップ時はSEP/BDもscaleに応じて縮小
     float popScale = (animType >= 1.5) ? clamp(fadeAlpha, 0.0, 1.0) : 1.0;
 
-    float mL   = SEP_X * (1.0 - scrL) * popScale;
-    float mR   = SEP_X * (1.0 - scrR) * popScale;
-    float mTop = SEP_Y * (1.0 - scrT) * popScale;
-    float mBtm = SEP_Y * (1.0 - scrB) * popScale;
+    float mL   = SEP_X * (1.0 - edgL) * popScale;
+    float mR   = SEP_X * (1.0 - edgR) * popScale;
+    float mTop = SEP_Y * (1.0 - edgT) * popScale;
+    float mBtm = SEP_Y * (1.0 - edgB) * popScale;
     float bL   = BD    * (1.0 - scrL) * popScale;
     float bR   = BD    * (1.0 - scrR) * popScale;
     float bTop = BD    * (1.0 - scrT) * popScale;
