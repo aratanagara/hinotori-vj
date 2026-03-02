@@ -1198,12 +1198,20 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
         // フェードイン
         fadeAlpha = ep;
     } else if(animType < 1.5){
-        // スライドイン
+        // スライドイン（コンテンツのみ。枠線/白マスクは最前面のまま）
         manga_initSeed3(vec3(panelId, timeIndex, 9.1));
         float dr = manga_random();
         vec2 sd = (dr<0.25) ? vec2(-1.0,0.0) : (dr<0.5) ? vec2(1.0,0.0) :
                   (dr<0.75) ? vec2(0.0,-1.0) : vec2(0.0,1.0);
-        aUV = innerUV - sd*(1.0-ep)*0.4;
+
+        // コマサイズに比例して「外から入ってくる」距離を決める（UV単位）
+        vec2 bMin = min(min(P0,P1),min(P2,P3));
+        vec2 bMax = max(max(P0,P1),max(P2,P3));
+        float d = (abs(sd.x) > 0.5) ? (bMax.x - bMin.x) : (bMax.y - bMin.y);
+
+        // 余白分ちょい足し（見切れ防止）
+        float pad = 0.06;
+        aUV = innerUV - sd * (1.0 - ep) * (d + pad);
         fadeAlpha = ep;
     } else {
         // ポップアップ（飛び出しOK）
