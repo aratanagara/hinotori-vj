@@ -1327,6 +1327,7 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
 
 
 vec3 bg_manga(vec2 fc){
+    return vec3(1.0, 0.0, 0.0); // DEBUG
     fc.y = resolution.y - fc.y;
     vec2 uv = fc / resolution;
     bool isWide = (resolution.x / resolution.y) > 1.15;
