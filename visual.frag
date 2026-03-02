@@ -1067,7 +1067,7 @@ float manga_edgePxDist(vec2 uv, vec2 A, vec2 B, vec2 res){
     vec2 e = B - A;
     float lenPx = length(e * res);
     float c = e.x*(uv.y-A.y) - e.y*(uv.x-A.x);
-    return (lenPx > 0.0001) ? -c * res.x / lenPx : 9999.0;
+    return (lenPx > 0.0001) ? c * res.x / lenPx : 9999.0;
 }
 
 float manga_quadDist(vec2 uv, vec2 P0, vec2 P1, vec2 P2, vec2 P3, vec2 res){
@@ -1173,8 +1173,7 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
     vec2 P2 = manga_quadP2(rowBand.z, rowBand.w, colBand.w);
     vec2 P3 = manga_quadP3(rowBand.z, rowBand.w, colBand.y);
 
-    // コマ内チェック（pageHit2が保証するはずだが念のため）
-    if(!manga_inQuad(innerUV, P0,P1,P2,P3)) return vec3(1.0);
+    // inQuadチェックをスキップ（pageHit2が保証）
 
     // アニメーション
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
@@ -1196,7 +1195,7 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
         vec2 sd = (dr<0.25) ? vec2(-1.0,0.0) : (dr<0.5) ? vec2(1.0,0.0) :
                   (dr<0.75) ? vec2(0.0,-1.0) : vec2(0.0,1.0);
         aUV = innerUV - sd*(1.0-ep)*0.4;
-        if(!manga_inQuad(aUV, P0,P1,P2,P3)) return vec3(1.0);
+        fadeAlpha = ep; // スライド中はフェードで対応
     } else {
         // ポップアップ
         float epB = manga_easeOutElastic(prog);
@@ -1236,7 +1235,7 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
                       float timeIndex, float sceneProgress, float animDuration){
 
     manga_initSeed(vec2(pageSeed, 99.1));
-    float numRows = floor(manga_random()*2.0) + 2.0;
+    float numRows = floor(manga_random()*2.0) + 2.0; // 2〜3行
     float cols0 = floor(manga_random()*2.0) + 1.0;
     float cs0   = manga_hash_f(pageSeed + 10.0);
     float cols1 = floor(manga_random()*2.0) + 1.0;
@@ -1246,16 +1245,23 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
 
     vec4 hit = manga_pageHit2(innerUV, xStart, xW, numRows, pageSeed,
                                cols0, cs0, cols1, cs1, cols2, cs2);
+    if(hit.w < 0.5) return vec3(1.0);
 
-    // DEBUG: hitしたら即色返し（outsideFrame・renderCell完全バイパス）
-    if(hit.w < 0.5) return vec3(0.9, 0.85, 0.8); // ミスヒット=ベージュ
-    float hDbg = fract(hit.z * 0.137 + 0.1);
-    return 0.5 + 0.5*cos(vec3(0.0,2.0,4.0) + hDbg * 6.28318);
+    float rowIdx = hit.x;
+    float colIdx = hit.y;
+    float panelId = hit.z;
 
-    // 以下デッドコード（コンパイラ用ダミー）
-    float _DEAD = hit.w;
+    vec4 rb = manga_rowBand(rowIdx, numRows, pageSeed);
+    float nc = cols0; float cs_row = cs0;
+    if(rowIdx > 0.5){ nc=cols1; cs_row=cs1; }
+    if(rowIdx > 1.5){ nc=cols2; cs_row=cs2; }
+    vec4 cb = manga_colBand(colIdx, nc, xStart, xW, cs_row,
+                             rb.x, rb.y, rb.z, rb.w);
 
-    float _DEAD2 = hit.x;
+    // outsideFrame チェック除去（bleed機能は後で再実装）
+    return manga_renderCell(innerUV, rb, cb,
+                            panelId + pageSeed * 0.01,
+                            timeIndex, sceneProgress, animDuration);
 }
 
 
