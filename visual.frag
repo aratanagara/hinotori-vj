@@ -443,15 +443,22 @@ vec3 bn_mrch(vec3 ro, vec3 rd){
   float d0 = 0.0;
   float id = 0.0;
   float it = 0.0;
+  float active = 1.0;
   for(int i=0;i<BN_ITR;i++){
     it = float(i);
-    vec3 sp = ro + rd * d0;
-    vec2 ds = bn_map(sp);
-    if(abs(ds.x) < BN_SRF || d0 > BN_DST){
-      if(abs(ds.x) < BN_SRF){ d0 = 0.0; }else{ break; }
+    if(active > 0.5){
+      vec3 sp = ro + rd * d0;
+      vec2 ds = bn_map(sp);
+      // 終了条件（break禁止のため active で停止）
+      if(abs(ds.x) < BN_SRF){
+        active = 0.0;
+      }else if(d0 > BN_DST){
+        active = 0.0;
+      }else{
+        d0 += ds.x;
+        id  = ds.y;
+      }
     }
-    d0 += ds.x;
-    id  = ds.y;
   }
   if(d0 > BN_DST) d0 = 0.0;
   return vec3(d0, id, it);
