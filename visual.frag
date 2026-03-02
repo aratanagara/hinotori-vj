@@ -1224,13 +1224,21 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
 
     // quadDistはUV単位を返すのでuvRes.xをかけてpx単位に変換
     float dist = manga_quadDist(innerUV, P0,P1,P2,P3, uvRes) * uvRes.x;
-    float aa   = 0.8;
-    float inSep = 1.0 - smoothstep(SEP-aa, SEP+aa, dist);
-    float inBd  = smoothstep(SEP-aa,SEP+aa,dist)*(1.0-smoothstep(SEP+BD-aa,SEP+BD+aa,dist));
+    float aa   = 2.0; // AA: 3〜4px幅（±2px）
 
-    if(inSep > 0.5) return vec3(1.0);
-    vec3 res = mix(col, vec3(0.0), inBd*fadeAlpha);
-    return mix(vec3(1.0), res, fadeAlpha);
+    // 余白（コマ間）: smoothstepでフェード → 白
+    float sepMask = smoothstep(SEP+aa, SEP-aa, dist); // dist<SEPで1
+    if(sepMask > 0.99) return vec3(1.0);
+
+    // 枠線: SEP〜SEP+BD の範囲
+    float inBd = smoothstep(SEP-aa, SEP+aa, dist)
+               * (1.0 - smoothstep(SEP+BD-aa, SEP+BD+aa, dist));
+
+    // 余白境界のソフトブレンド（AAのためvec3(1.0)とmix）
+    vec3 res = mix(col, vec3(0.0), inBd * fadeAlpha);
+    res = mix(vec3(1.0), res, fadeAlpha);
+    // SEP付近をAAでフェードアウト
+    return mix(res, vec3(1.0), sepMask);
 }
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
                       float timeIndex, float sceneProgress, float animDuration){
@@ -1258,6 +1266,41 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     if(rowIdx > 1.5){ nc=cols2; cs_row=cs2; }
     vec4 cb = manga_colBand(colIdx, nc, xStart, xW, cs_row,
                              rb.x, rb.y, rb.z, rb.w);
+
+    // === 裁ち切り処理 ===
+    // innerUVはclampされているので画面端でも0か1に張り付く
+    // → そのまま renderCell に渡すだけで裁ち切り風になる
+    // ただし内枠の外（余白領域）では一部のコマのみ表示する:
+    // コマの対応辺がページ端（0 or 1）に接している場合のみ通す
+
+    float _short3  = min(resolution.x, resolution.y);
+    float INNER3   = _short3 * 0.05;
+    vec2 pfMin3    = vec2(INNER3) / resolution;
+    vec2 pfMax3    = vec2(1.0) - pfMin3;
+
+    bool outsideL = uv.x < pfMin3.x;
+    bool outsideR = uv.x > pfMax3.x;
+    bool outsideT = uv.y < pfMin3.y;
+    bool outsideB = uv.y > pfMax3.y;
+
+    if(outsideL || outsideR || outsideT || outsideB){
+        // コマの各辺がページ端（innerUV 0 or 1）に接しているか
+        // 接していない辺から外に出たピクセルは白
+        float eps = 0.02;
+        // 左辺: colBand の左x（上端・下端）が xStart に近い
+        bool atL = (min(cb.x, cb.y) < xStart + eps);
+        // 右辺: colBand の右x が xStart+xW に近い
+        bool atR = (max(cb.z, cb.w) > xStart + xW - eps);
+        // 上辺: rowBand の上y が 0 に近い
+        bool atT = (min(rb.x, rb.y) < eps);
+        // 下辺: rowBand の下y が 1 に近い
+        bool atB = (max(rb.z, rb.w) > 1.0 - eps);
+
+        if(outsideL && !atL) return vec3(1.0);
+        if(outsideR && !atR) return vec3(1.0);
+        if(outsideT && !atT) return vec3(1.0);
+        if(outsideB && !atB) return vec3(1.0);
+    }
 
     return manga_renderCell(innerUV, rb, cb,
                             panelId + pageSeed * 0.01,
