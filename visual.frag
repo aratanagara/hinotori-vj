@@ -1057,6 +1057,20 @@ vec2 manga_quadP3(float b1L,float b1R,float lB){ return vec2(lB, manga_hBndY(lB,
 // 2D cross: e×v = e.x*v.y - e.y*v.x
 float manga_cross2(vec2 e, vec2 v){ return e.x*v.y - e.y*v.x; }
 
+// y方向だけスケールした空間での、辺(A->B)から点pへの符号付き距離（px）
+// - p/A/B は「px座標」
+// - yScale=0.25 なら、見かけの垂直厚みが4倍になる
+float manga_edgeDistScaledPx(vec2 pPx, vec2 APx, vec2 BPx, float yScale){
+    vec2 p  = vec2(pPx.x,  pPx.y  * yScale);
+    vec2 A  = vec2(APx.x,  APx.y  * yScale);
+    vec2 B  = vec2(BPx.x,  BPx.y  * yScale);
+    vec2 e  = B - A;
+    float len = max(length(e), 1e-6);
+    float c = manga_cross2(e, p - A);
+    return c / len;
+}
+
+
 bool manga_inQuad(vec2 p, vec2 P0, vec2 P1, vec2 P2, vec2 P3){
     float d0=manga_cross2(P1-P0, p-P0);
     float d1=manga_cross2(P2-P1, p-P1);
