@@ -995,9 +995,10 @@ vec4 manga_rowBand(float rowIdx, float numRows, float pageSeed){
 
     // 境界1 (row0の下辺 = row1の上辺)
     float b1c = mix(0.28, 0.52, manga_hash_f(pageSeed + 10.0));
-    float b1slope = (manga_hash_f(pageSeed + 11.0) < PROB)
-        ? (manga_hash_f(pageSeed + 12.0) - 0.5) * 0.5
-        : 0.0;
+    float b1sRaw = (manga_hash_f(pageSeed + 12.0) - 0.5) * 0.5;
+    // 傾きが10°未満(|slope|<0.176)なら0にする
+    float b1slope = (manga_hash_f(pageSeed + 11.0) < PROB && abs(b1sRaw) > 0.176)
+        ? b1sRaw : 0.0;
     float b1L = clamp(b1c - b1slope*0.5, 0.12, 0.82);
     float b1R = clamp(b1c + b1slope*0.5, 0.12, 0.82);
 
@@ -1005,9 +1006,9 @@ vec4 manga_rowBand(float rowIdx, float numRows, float pageSeed){
     // b1の平均より下に配置
     float b1avg = (b1L + b1R) * 0.5;
     float b2c = mix(b1avg + 0.18, 0.84, manga_hash_f(pageSeed + 20.0));
-    float b2slope = (manga_hash_f(pageSeed + 21.0) < PROB)
-        ? (manga_hash_f(pageSeed + 22.0) - 0.5) * 0.5
-        : 0.0;
+    float b2sRaw = (manga_hash_f(pageSeed + 22.0) - 0.5) * 0.5;
+    float b2slope = (manga_hash_f(pageSeed + 21.0) < PROB && abs(b2sRaw) > 0.176)
+        ? b2sRaw : 0.0;
     float b2L = clamp(b2c - b2slope*0.5, b1L + 0.10, 0.88);
     float b2R = clamp(b2c + b2slope*0.5, b1R + 0.10, 0.88);
 
@@ -1159,7 +1160,7 @@ vec4 manga_pageHit2(vec2 uv, float xStart, float xW,
     return result;
 }
 
-vec3 manga_renderCell(vec2 fc, vec4 rowBand, vec4 colBand,
+vec3 manga_renderCell(vec2 fc, vec2 innerUV, vec4 rowBand, vec4 colBand,
                       float panelId, float timeIndex,
                       float sceneProgress, float animDuration,
                       float isBleed){
@@ -1199,13 +1200,10 @@ vec3 manga_renderCell(vec2 fc, vec4 rowBand, vec4 colBand,
     vec2 P2 = manga_quadP2(btmL,btmR,rightB);
     vec2 P3 = manga_quadP3(btmL,btmR,leftB);
 
-    vec2 uv      = fc / resolution;
-    vec2 innerUV = (uv - fMin) / fSize;
+    // innerUVは引数として受け取る（pageHit2と同じ座標系）
 
     // コマ外は白
     if(!manga_inQuad(innerUV, P0,P1,P2,P3)) return vec3(1.0);
-    return vec3(1.0, 0.0, 0.0); // DEBUG reached renderCell
-
     // アニメーション
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
     float cellDelay = manga_random() * 0.3;
@@ -1321,7 +1319,7 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
         if(!(okL && okR && okT && okB)) return vec3(1.0);
     }
 
-    return manga_renderCell(fc, rb, cb,
+    return manga_renderCell(fc, innerUV, rb, cb,
                             panelId + pageSeed * 0.01,
                             timeIndex, sceneProgress, animDuration, isBleed);
 }
