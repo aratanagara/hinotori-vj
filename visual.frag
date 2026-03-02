@@ -1030,71 +1030,21 @@ vec4 manga_colBand(float colIdx, float numCols,
     else             return vec4(bcT, bcB, xStart+xW, xStart+xW);
 }
 
-// 行境界線 (y=hBndY(x)) と 列境界線 (x=vBndX(t), t=(y-topY(x))/h(x)) の交点を求める
-// 交点 (px, py) を返す。解けない場合は fallback
-vec2 manga_intersect(float hL0, float hR0, float hL1, float hR1,
-                     float cT, float cB){
-    // 上辺y: y0(x) = hL0 + (hR0-hL0)*x
-    // 下辺y: y1(x) = hL1 + (hR1-hL1)*x
-    // 列x:   x = cT + (cB-cT)*t,  t = (y-y0(x))/(y1(x)-y0(x))
-    // 联立: x = cT + (cB-cT)*(y-y0(x))/(y1(x)-y0(x))
-    // 数値的に二分法で解く(GLSLでループ可)
-    float lo = 0.0, hi = 1.0;
-    for(int i=0; i<16; i++){
-        float mid = (lo + hi) * 0.5;
-        float y0m = manga_hBndY(mid, hL0, hR0);
-        float y1m = manga_hBndY(mid, hL1, hR1);
-        float h   = y1m - y0m;
-        float x_at_mid = (h > 0.0001)
-            ? cT + (cB - cT) * (manga_hBndY(mid, hL0, hR0) + h * 0.5 - y0m) / h
-            : (cT + cB) * 0.5;
-        // より単純に: 上辺での交点
-        float t0 = (h > 0.0001) ? 0.0 : 0.5;
-        // 正しい式: t = (y_cross - y0(x)) / (y1(x)-y0(x)), x = cT+(cB-cT)*t を連立
-        // → x = cT + (cB-cT) * (y0(x)+t*(y1(x)-y0(x)) - y0(x)) / (y1(x)-y0(x))
-        //    = cT + (cB-cT) * t  でも t は y に依存 → 収束しない
-        // 別アプローチ: xを固定して t = (y-y0(x))/(y1-y0) を使い
-        //               x_required = cT+(cB-cT)*t を比較
-        float y_row_center = (y0m + y1m) * 0.5;
-        float t_mid = (h > 0.0001) ? (y_row_center - y0m) / h : 0.5;
-        float x_req = cT + (cB - cT) * t_mid;
-        if(x_req > mid) lo = mid; else hi = mid;
-    }
-    float px = (lo + hi) * 0.5;
-    float y0p = manga_hBndY(px, hL0, hR0);
-    float y1p = manga_hBndY(px, hL1, hR1);
-    float h   = y1p - y0p;
-    float t   = (h > 0.0001) ? clamp((cT + (cB-cT)*0.5 - y0p) / h, 0.0, 1.0) : 0.5;
-    // 実際はもっとシンプルに上辺/下辺での列x座標を直接使う
-    return vec2(px, y0p + t * h);
-}
-
-// コマの正確な4頂点を求める
-// P0=左上, P1=右上, P2=右下, P3=左下
-void manga_quadVerts(
-    float b0L, float b0R, float b1L, float b1R, // 行境界
-    float lT,  float lB,  float rT,  float rB,  // 列境界 (leftTop,leftBtm,rightTop,rightBtm)
-    out vec2 P0, out vec2 P1, out vec2 P2, out vec2 P3)
-{
-    // P0: 上辺(y=b0) と 左辺(x=lT..lB) の交点
-    // 上辺での y: y = b0L+(b0R-b0L)*x
-    // 左辺での x: x = lT+(lB-lT)*t, t=(y-b0Y(x))/(b1Y(x)-b0Y(x))
-    // 上辺上では t=0 なので x=lT, y=b0Y(lT)
-    P0 = vec2(lT, manga_hBndY(lT, b0L, b0R));
-    P1 = vec2(rT, manga_hBndY(rT, b0L, b0R));
-    P2 = vec2(rB, manga_hBndY(rB, b1L, b1R));
-    P3 = vec2(lB, manga_hBndY(lB, b1L, b1R));
-}
+// コマの4頂点を個別に計算（GLES互換: out引数不使用）
+vec2 manga_quadP0(float b0L,float b0R,float lT){ return vec2(lT, manga_hBndY(lT,b0L,b0R)); }
+vec2 manga_quadP1(float b0L,float b0R,float rT){ return vec2(rT, manga_hBndY(rT,b0L,b0R)); }
+vec2 manga_quadP2(float b1L,float b1R,float rB){ return vec2(rB, manga_hBndY(rB,b1L,b1R)); }
+vec2 manga_quadP3(float b1L,float b1R,float lB){ return vec2(lB, manga_hBndY(lB,b1L,b1R)); }
 
 // 点pがコマ内かどうか（4頂点の凸四角形、時計回り）
+// 2D cross: e×v = e.x*v.y - e.y*v.x
+float manga_cross2(vec2 e, vec2 v){ return e.x*v.y - e.y*v.x; }
+
 bool manga_inQuad(vec2 p, vec2 P0, vec2 P1, vec2 P2, vec2 P3){
-    // 各辺に対して左側（内側）かチェック
-    // P0→P1→P2→P3 の順（時計回りなら右側が内側）
-    vec2 e0=P1-P0; vec2 e1=P2-P1; vec2 e2=P3-P2; vec2 e3=P0-P3;
-    float d0=cross(vec3(e0,0),vec3(p-P0,0)).z;
-    float d1=cross(vec3(e1,0),vec3(p-P1,0)).z;
-    float d2=cross(vec3(e2,0),vec3(p-P2,0)).z;
-    float d3=cross(vec3(e3,0),vec3(p-P3,0)).z;
+    float d0=manga_cross2(P1-P0, p-P0);
+    float d1=manga_cross2(P2-P1, p-P1);
+    float d2=manga_cross2(P3-P2, p-P2);
+    float d3=manga_cross2(P0-P3, p-P3);
     return (d0<=0.0 && d1<=0.0 && d2<=0.0 && d3<=0.0)
         || (d0>=0.0 && d1>=0.0 && d2>=0.0 && d3>=0.0);
 }
@@ -1103,16 +1053,18 @@ bool manga_inQuad(vec2 p, vec2 P0, vec2 P1, vec2 P2, vec2 P3){
 // P0(左上)→P1(右上)→P2(右下)→P3(左下): 時計回り
 // 辺 A→B の内側（右側）への距離 = -(e×(p-A))/|e|px
 //   e = B-A, cross2D(e,v) = e.x*v.y - e.y*v.x
+float manga_edgePxDist(vec2 uv, vec2 A, vec2 B, vec2 res){
+    vec2 e = B - A;
+    float lenPx = length(e * res);
+    float c = e.x*(uv.y-A.y) - e.y*(uv.x-A.x);
+    return (lenPx > 0.0001) ? -c * res.x / lenPx : 1e4;
+}
+
 float manga_quadDist(vec2 uv, vec2 P0, vec2 P1, vec2 P2, vec2 P3, vec2 res){
-    vec2 e; float c; float lenPx;
-    #define EDGEDIST(A,B) (e=(B)-(A), lenPx=length(e*res), \
-        c=(e.x*(uv.y-(A).y)-e.y*(uv.x-(A).x)), \
-        (lenPx>0.0001 ? -c*res.x/lenPx : 1e9))
-    float d0=EDGEDIST(P0,P1);
-    float d1=EDGEDIST(P1,P2);
-    float d2=EDGEDIST(P2,P3);
-    float d3=EDGEDIST(P3,P0);
-    #undef EDGEDIST
+    float d0 = manga_edgePxDist(uv,P0,P1,res);
+    float d1 = manga_edgePxDist(uv,P1,P2,res);
+    float d2 = manga_edgePxDist(uv,P2,P3,res);
+    float d3 = manga_edgePxDist(uv,P3,P0,res);
     return min(min(d0,d1),min(d2,d3));
 }
 
@@ -1134,9 +1086,10 @@ vec4 manga_pageHit2(vec2 uv, float xStart, float xW,
             if(fc2 >= nc) break;
             vec4 cb = manga_colBand(fc2, nc, xStart, xW, cs_row,
                                     rb.x, rb.y, rb.z, rb.w);
-            vec2 P0,P1,P2,P3;
-            manga_quadVerts(rb.x,rb.y,rb.z,rb.w, cb.x,cb.y,cb.z,cb.w,
-                            P0,P1,P2,P3);
+            vec2 P0=manga_quadP0(rb.x,rb.y,cb.x);
+            vec2 P1=manga_quadP1(rb.x,rb.y,cb.z);
+            vec2 P2=manga_quadP2(rb.z,rb.w,cb.w);
+            vec2 P3=manga_quadP3(rb.z,rb.w,cb.y);
             if(manga_inQuad(uv, P0,P1,P2,P3))
                 return vec4(fr, fc2, fr*4.0+fc2, 1.0);
         }
@@ -1184,8 +1137,10 @@ vec3 manga_renderCell(vec2 fc, vec4 rowBand, vec4 colBand,
     if(scrB > 0.5){ btmL   = (1.0+fMin.y)/fSize.y; btmR   = btmL; }
 
     // 4頂点（innerUV空間）
-    vec2 P0,P1,P2,P3;
-    manga_quadVerts(topL,topR,btmL,btmR, leftT,leftB,rightT,rightB, P0,P1,P2,P3);
+    vec2 P0=manga_quadP0(topL,topR,leftT);
+    vec2 P1=manga_quadP1(topL,topR,rightT);
+    vec2 P2=manga_quadP2(btmL,btmR,rightB);
+    vec2 P3=manga_quadP3(btmL,btmR,leftB);
 
     vec2 uv = fc / resolution;
     vec2 innerUV = (uv - fMin) / fSize;
