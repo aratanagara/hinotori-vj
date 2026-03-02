@@ -1057,7 +1057,7 @@ float manga_edgePxDist(vec2 uv, vec2 A, vec2 B, vec2 res){
     vec2 e = B - A;
     float lenPx = length(e * res);
     float c = e.x*(uv.y-A.y) - e.y*(uv.x-A.x);
-    return (lenPx > 0.0001) ? -c * res.x / lenPx : 1e4;
+    return (lenPx > 0.0001) ? -c * res.x / lenPx : 9999.0;
 }
 
 float manga_quadDist(vec2 uv, vec2 P0, vec2 P1, vec2 P2, vec2 P3, vec2 res){
@@ -1117,13 +1117,11 @@ vec3 manga_renderCell(vec2 fc, vec4 rowBand, vec4 colBand,
     float leftT = colBand.x; float leftB = colBand.y;
     float rightT= colBand.z; float rightB= colBand.w;
 
-    // 断ち切り判定
-    float atL = step(leftT,  xStart + 0.004);  // xStartはない… innerUV空間なので
-    float atR = step(0.996, rightT);
+    // 断ち切り判定（innerUV空間: 0=左端, 1=右端）
+    float atL = step(min(leftT,leftB), 0.004);
+    float atR = step(0.996, max(rightT,rightB));
     float atT = step(min(topL,topR),   0.004);
     float atB = step(0.996, max(btmL,btmR));
-    // xStartが不明なのでL/Rはx=0/1基準
-    atL = step(min(leftT,leftB), 0.004);
 
     float scrL = isBleed * atL;
     float scrR = isBleed * atR;
@@ -1171,25 +1169,24 @@ vec3 manga_renderCell(vec2 fc, vec4 rowBand, vec4 colBand,
         else               slideDir = vec2( 0.0,  1.0);
         aInnerUV = innerUV - slideDir * (1.0 - ep) * 0.4;
     } else {
-        // ポップアップ: コマ中心からスケール
-        vec2 center = (P0+P1+P2+P3)*0.25;
-        float epB = manga_easeOutElastic(prog);
-        float sc  = max(epB, 0.001);
-        aInnerUV  = (innerUV - center) / sc + center;
-        fadeAlpha = clamp(epB, 0.0, 1.0);
-        // スケール後のクリップはinsideで行うのでここでは更新しない
+        // ポップアップ: コマ中心からスケール（aUV用）
+        vec2 popCenter = (P0+P1+P2+P3)*0.25;
+        float popEpB = manga_easeOutElastic(prog);
+        float popSc  = max(popEpB, 0.001);
+        aInnerUV  = (innerUV - popCenter) / popSc + popCenter;
+        fadeAlpha = clamp(popEpB, 0.0, 1.0);
     }
 
     // ポップアップ: スケール後にinside再判定
     bool aInside = inside;
-    vec2 center = (P0+P1+P2+P3) * 0.25;
     if(animType >= 1.5){
-        float epB = manga_easeOutElastic(prog);
-        float sc  = clamp(epB, 0.001, 2.0);
-        vec2 sP0 = center + (P0-center)*sc;
-        vec2 sP1 = center + (P1-center)*sc;
-        vec2 sP2 = center + (P2-center)*sc;
-        vec2 sP3 = center + (P3-center)*sc;
+        vec2 popCenter2 = (P0+P1+P2+P3) * 0.25;
+        float popEpB2 = manga_easeOutElastic(prog);
+        float popSc2  = clamp(popEpB2, 0.001, 2.0);
+        vec2 sP0 = popCenter2 + (P0-popCenter2)*popSc2;
+        vec2 sP1 = popCenter2 + (P1-popCenter2)*popSc2;
+        vec2 sP2 = popCenter2 + (P2-popCenter2)*popSc2;
+        vec2 sP3 = popCenter2 + (P3-popCenter2)*popSc2;
         aInside = manga_inQuad(innerUV, sP0,sP1,sP2,sP3);
     }
 
