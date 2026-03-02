@@ -945,9 +945,6 @@ vec3 manga_mangaHalftone(vec2 uv, vec3 col){
     return col*manga_halftone(uv,gray,80.0,0.0);
 }
 
-// 上下断ち切りコマフラグ（arc overlay 抑制用）
-float manga_bleedTB_flag = 0.0;
-
 float manga_hash_f(float x){return fract(sin(x*12.9898)*43758.5453);}
 float manga_hash2_f(vec2 v){return manga_hash_f(v.x+manga_hash_f(v.y));}
 float manga_hash3_f(vec3 v){return manga_hash_f(v.x+manga_hash_f(v.y+manga_hash_f(v.z)));}
@@ -1201,12 +1198,20 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
         // フェードイン
         fadeAlpha = ep;
     } else if(animType < 1.5){
-        // スライドイン
+        // スライドイン（コンテンツのみ。枠線/白マスクは最前面のまま）
         manga_initSeed3(vec3(panelId, timeIndex, 9.1));
         float dr = manga_random();
         vec2 sd = (dr<0.25) ? vec2(-1.0,0.0) : (dr<0.5) ? vec2(1.0,0.0) :
                   (dr<0.75) ? vec2(0.0,-1.0) : vec2(0.0,1.0);
-        aUV = innerUV - sd*(1.0-ep)*0.4;
+
+        // コマサイズに比例して「外から入ってくる」距離を決める（UV単位）
+        vec2 bMin = min(min(P0,P1),min(P2,P3));
+        vec2 bMax = max(max(P0,P1),max(P2,P3));
+        float d = (abs(sd.x) > 0.5) ? (bMax.x - bMin.x) : (bMax.y - bMin.y);
+
+        // 余白分ちょい足し（見切れ防止）
+        float pad = 0.06;
+        aUV = innerUV - sd * (1.0 - ep) * (d + pad);
         fadeAlpha = ep;
     } else {
         // ポップアップ（飛び出しOK）
@@ -1328,9 +1333,6 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, vec2 innerUV_raw, float xS
     bool bleedR = outerRight && isRightMost && (manga_random() < pBleed);
     bool bleedT = isTopMost  && (manga_random() < pBleed);
     bool bleedB = isBotMost  && (manga_random() < pBleed);
-
-    // 上下断ち切りフラグをグローバルにセット（main()のarc抑制用）
-    if(bleedT || bleedB) manga_bleedTB_flag = 1.0;
 
     // 断ち切りしない側の内枠外は白
     if(uv.x < fMin3.x && !bleedL) return vec3(1.0);
@@ -1758,11 +1760,8 @@ void main(){
 
   float ringLine = smoothstep(lineW * mix(5.0, 20.0, hash21(vec2(ringId))), 0.0, d0);
 
-  // 上下断ち切りコマ内は arc（斜め成分）を封印
-  float arcMasked = arc * (1.0 - manga_bleedTB_flag);
-
   float aLine = clamp(
-    sqrt(ringLine * arcMasked * alive * inkVis) * colorLineOpacity * (1.0 + flash),
+    sqrt(ringLine * arc * alive * inkVis) * colorLineOpacity * (1.0 + flash),
     0.0, 1.0
   );
   
