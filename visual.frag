@@ -1201,29 +1201,52 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
         // フェードイン
         fadeAlpha = ep;
     } else if(animType < 1.5){
-        // スライドイン
+        // スライドイン: quad全体をオフセット、コンテンツ位置は元のまま
         manga_initSeed3(vec3(panelId, timeIndex, 9.1));
         float dr = manga_random();
         vec2 sd = (dr<0.25) ? vec2(-1.0,0.0) : (dr<0.5) ? vec2(1.0,0.0) :
                   (dr<0.75) ? vec2(0.0,-1.0) : vec2(0.0,1.0);
-        aUV = innerUV - sd*(1.0-ep)*0.4;
-        fadeAlpha = ep;
+        // コマの幅・高さ分スライド（+マージン少し）
+        vec2 qSpan = max(max(P0,P1),max(P2,P3)) - min(min(P0,P1),min(P2,P3));
+        vec2 slideAmt = sd * (1.0 - ep) * (qSpan + vec2(0.08));
+        // quad頂点をオフセット（コマ枠・余白ごと動く）
+        P0 += slideAmt; P1 += slideAmt;
+        P2 += slideAmt; P3 += slideAmt;
+        // スライドしたquad外なら白
+        if(!manga_inQuad(innerUV, P0,P1,P2,P3)) return vec3(1.0);
+        // コンテンツはオフセット前の位置でサンプリング
+        aUV = innerUV - slideAmt;
     } else {
         // ポップアップ（飛び出しOK）
-        float epB = manga_easeOutElastic(prog);  // 0..1 を超えるオーバーシュートあり
+        float epB = manga_easeOutElastic(prog);
         float sc  = max(epB, 0.001);
-        vec2 ctr  = (P0+P1+P2+P3)*0.25;
 
-        // ★ コマ自体をスケールして「本来の範囲から飛び出す」
+        // 断ち切り拡張前の頂点（0/1クランプ）で重心を計算
+        // extT/extBが入ると重心がずれてスケール時に歪むのを防ぐ
+        vec4 rbC = vec4(
+            (bleedT > 0.5) ? 0.0 : rowBand.x,
+            (bleedT > 0.5) ? 0.0 : rowBand.y,
+            (bleedB > 0.5) ? 1.0 : rowBand.z,
+            (bleedB > 0.5) ? 1.0 : rowBand.w
+        );
+        vec4 cbC = vec4(
+            (bleedL > 0.5) ? 0.0 : colBand.x,
+            (bleedL > 0.5) ? 0.0 : colBand.y,
+            (bleedR > 0.5) ? 1.0 : colBand.z,
+            (bleedR > 0.5) ? 1.0 : colBand.w
+        );
+        vec2 C0 = manga_quadP0(rbC.x, rbC.y, cbC.x);
+        vec2 C1 = manga_quadP1(rbC.x, rbC.y, cbC.z);
+        vec2 C2 = manga_quadP2(rbC.z, rbC.w, cbC.w);
+        vec2 C3 = manga_quadP3(rbC.z, rbC.w, cbC.y);
+        vec2 ctr = (C0+C1+C2+C3) * 0.25;
+
         P0 = ctr + (P0 - ctr) * sc;
         P1 = ctr + (P1 - ctr) * sc;
         P2 = ctr + (P2 - ctr) * sc;
         P3 = ctr + (P3 - ctr) * sc;
 
-        // 中身も一緒に拡大（描画点→元UVへ逆変換）
         aUV = ctr + (innerUV - ctr) / sc;
-
-        // クリップはしない（白で切らない）
         fadeAlpha = clamp(epB, 0.0, 1.0);
     }
 
