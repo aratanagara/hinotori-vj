@@ -1206,8 +1206,24 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
         float dr = manga_random();
         vec2 sd = (dr<0.25) ? vec2(-1.0,0.0) : (dr<0.5) ? vec2(1.0,0.0) :
                   (dr<0.75) ? vec2(0.0,-1.0) : vec2(0.0,1.0);
-        // コマの幅・高さ分スライド（+マージン少し）
-        vec2 qSpan = max(max(P0,P1),max(P2,P3)) - min(min(P0,P1),min(P2,P3));
+        // 断ち切り拡張前の頂点でqSpanを計算（extT/extBで過大スライドを防ぐ）
+        vec4 rbS = vec4(
+            (bleedT > 0.5) ? 0.0 : rowBand.x,
+            (bleedT > 0.5) ? 0.0 : rowBand.y,
+            (bleedB > 0.5) ? 1.0 : rowBand.z,
+            (bleedB > 0.5) ? 1.0 : rowBand.w
+        );
+        vec4 cbS = vec4(
+            (bleedL > 0.5) ? 0.0 : colBand.x,
+            (bleedL > 0.5) ? 0.0 : colBand.y,
+            (bleedR > 0.5) ? 1.0 : colBand.z,
+            (bleedR > 0.5) ? 1.0 : colBand.w
+        );
+        vec2 S0 = manga_quadP0(rbS.x, rbS.y, cbS.x);
+        vec2 S1 = manga_quadP1(rbS.x, rbS.y, cbS.z);
+        vec2 S2 = manga_quadP2(rbS.z, rbS.w, cbS.w);
+        vec2 S3 = manga_quadP3(rbS.z, rbS.w, cbS.y);
+        vec2 qSpan = max(max(S0,S1),max(S2,S3)) - min(min(S0,S1),min(S2,S3));
         vec2 slideAmt = sd * (1.0 - ep) * (qSpan + vec2(0.08));
         // quad頂点をオフセット（コマ枠・余白ごと動く）
         P0 += slideAmt; P1 += slideAmt;
