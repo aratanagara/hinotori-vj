@@ -1166,7 +1166,8 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
                       float bleedL, float bleedR, float bleedT, float bleedB){
     float _short = min(resolution.x, resolution.y);
     float SEP    = _short * 0.006;
-    float BD     = _short * 0.0028 + 1.0; // +1px
+    float BD_V   = _short * 0.0028 + 1.0; // 縦線 +1px
+    float BD_H   = BD_V * 4.0;        // 横線は縦線の4倍
 
     // innerUV空間(0..1)での頂点
     vec2 P0 = manga_quadP0(rowBand.x, rowBand.y, colBand.x);
@@ -1246,10 +1247,10 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
     float whiteMask = max(max(wTop, wRgt), max(wBot, wLft));
 
     // 枠線: SEP..SEP+BD が黒。ただし断ち切り側は枠線を描かない（画面端で消える）
-    float bTop = (bleedT < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dTop) * (1.0 - smoothstep(SEP+BD-aa, SEP+BD+aa, dTop))) : 0.0;
-    float bRgt = (bleedR < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dRgt) * (1.0 - smoothstep(SEP+BD-aa, SEP+BD+aa, dRgt))) : 0.0;
-    float bBot = (bleedB < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dBot) * (1.0 - smoothstep(SEP+BD-aa, SEP+BD+aa, dBot))) : 0.0;
-    float bLft = (bleedL < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dLft) * (1.0 - smoothstep(SEP+BD-aa, SEP+BD+aa, dLft))) : 0.0;
+    float bTop = (bleedT < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dTop) * (1.0 - smoothstep(SEP+BD_H-aa, SEP+BD_H+aa, dTop))) : 0.0;
+    float bRgt = (bleedR < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dRgt) * (1.0 - smoothstep(SEP+BD_V-aa, SEP+BD_V+aa, dRgt))) : 0.0;
+    float bBot = (bleedB < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dBot) * (1.0 - smoothstep(SEP+BD_H-aa, SEP+BD_H+aa, dBot))) : 0.0;
+    float bLft = (bleedL < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dLft) * (1.0 - smoothstep(SEP+BD_V-aa, SEP+BD_V+aa, dLft))) : 0.0;
     float inBd = max(max(bTop, bRgt), max(bBot, bLft));
 
     vec3 res = mix(col, vec3(0.0), inBd * fadeAlpha);
