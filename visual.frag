@@ -968,132 +968,155 @@ float manga_easeOutElastic(float t){
 
 // 行の y座標・高さ（0〜3行対応）
 // ================================================================
-// manga panel layout  (斜め対応版)
+// manga panel layout  (斜め台形コマ)
 //
-// 行境界線・列境界線それぞれが「左端y / 右端y」を持つ
-// → 各コマは常に4辺の台形(三角形不可)
+// 行境界線 i: y = hL_i + (hR_i - hL_i) * x
+// 列境界線 j (行内): x = cT_j + (cB_j - cT_j) * ((y - rowTopY(x)) / rowH(x))
+//
+// コマ (row,col) の4頂点を交点計算で正確に求め、
+// inQuad / edgeDist を同じ4頂点で計算することで余白を均一にする
 // ================================================================
 
-// ---- 行レイアウト ----
-// 戻り値: vec4(yL_top, yR_top, yL_btm, yR_btm)
-//   yL_top = 行上辺のx=0側y座標, yR_top = x=1側y座標
-//   yL_btm = 行下辺のx=0側y座標, yR_btm = x=1側y座標
+// 行境界 y 値 (x: innerUV.x 0..1)
+float manga_hBndY(float x, float yL, float yR){ return yL + (yR - yL) * x; }
+
+// 列境界 x 値 (t: 行内相対 y 0..1)
+float manga_vBndX(float t, float xT, float xB){ return xT + (xB - xT) * t; }
+
+// 行境界パラメータ: vec4(b0L,b0R, b1L,b1R) = 上辺・下辺のx=0/x=1でのy
+// row=0: 上=y0, 下=b1
+// row=1: 上=b1, 下=b2
+// row=2: 上=b2, 下=y1
 vec4 manga_rowBand(float rowIdx, float numRows, float pageSeed){
-    // 各行境界(上辺)の左端y・右端y を生成
-    // 境界0: y=0 (常に水平)
-    // 境界1: row0-1の間
-    // 境界2: row1-2の間
-    // 境界3: y=1 (常に水平)
-    float SLOPE_PROB = 0.55; // 斜めになる確率
-
-    // 境界1 (行0と行1の間)
-    float b1_base = mix(0.25, 0.55, manga_hash_f(pageSeed + 10.0));
+    float PROB = 0.55;
+    // 境界1
+    float b1c = mix(0.28, 0.52, manga_hash_f(pageSeed + 10.0));
     float b1L, b1R;
-    if(manga_hash_f(pageSeed + 11.0) < SLOPE_PROB){
-        float slope = (manga_hash_f(pageSeed + 12.0) - 0.5) * 0.35;
-        b1L = clamp(b1_base - slope * 0.5, 0.10, 0.85);
-        b1R = clamp(b1_base + slope * 0.5, 0.10, 0.85);
-    } else {
-        b1L = b1_base; b1R = b1_base;
-    }
-
-    // 境界2 (行1と行2の間) — numRows==2のとき不要
-    // b1より最低0.12下、かつ最大0.88に収める
+    if(manga_hash_f(pageSeed + 11.0) < PROB){
+        float s = (manga_hash_f(pageSeed + 12.0) - 0.5) * 0.4;
+        b1L = clamp(b1c - s, 0.12, 0.82);
+        b1R = clamp(b1c + s, 0.12, 0.82);
+    } else { b1L = b1c; b1R = b1c; }
+    // 境界2 (3行のときのみ使用)
     float b1max = max(b1L, b1R);
-    float b2_base = mix(b1max + 0.15, 0.82, manga_hash_f(pageSeed + 20.0));
+    float b2c = mix(b1max + 0.18, 0.84, manga_hash_f(pageSeed + 20.0));
     float b2L, b2R;
-    if(manga_hash_f(pageSeed + 21.0) < SLOPE_PROB){
-        float slope = (manga_hash_f(pageSeed + 22.0) - 0.5) * 0.35;
-        b2L = clamp(b2_base - slope * 0.5, b1L + 0.10, 0.88);
-        b2R = clamp(b2_base + slope * 0.5, b1R + 0.10, 0.88);
-    } else {
-        b2L = b2_base; b2R = b2_base;
-    }
-
-    // rowIdx の上辺・下辺
-    float topL, topR, btmL, btmR;
-    if(rowIdx < 0.5){
-        topL=0.0; topR=0.0; btmL=b1L; btmR=b1R;
-    } else if(rowIdx < 1.5){
-        topL=b1L; topR=b1R; btmL=b2L; btmR=b2R;
-    } else {
-        topL=b2L; topR=b2R; btmL=1.0; btmR=1.0;
-    }
-    return vec4(topL, topR, btmL, btmR);
+    if(manga_hash_f(pageSeed + 21.0) < PROB){
+        float s = (manga_hash_f(pageSeed + 22.0) - 0.5) * 0.4;
+        b2L = clamp(b2c - s, b1L + 0.12, 0.88);
+        b2R = clamp(b2c + s, b1R + 0.12, 0.88);
+    } else { b2L = b2c; b2R = b2c; }
+    if(rowIdx < 0.5)      return vec4(0.0,  0.0,  b1L,  b1R);
+    else if(rowIdx < 1.5) return vec4(b1L,  b1R,  b2L,  b2R);
+    else                  return vec4(b2L,  b2R,  1.0,  1.0);
 }
 
-// x位置でのy補間
-float manga_rowBandY(float x, float yL, float yR){ return mix(yL, yR, x); }
-
-// ---- 列レイアウト ----
-// 戻り値: vec4(xT_left, xB_left, xT_right, xB_right)
-//   xT_left = 列左辺のy=rowTop側x, xB_left = y=rowBtm側x
-//   xT_right= 列右辺のy=rowTop側x, xB_right= y=rowBtm側x
+// 列境界パラメータ: vec4(c0T,c0B, c1T,c1B) = 左辺・右辺の行上端/行下端でのx
 vec4 manga_colBand(float colIdx, float numCols,
-                   float xStart, float xW,
-                   float rowSeed,
-                   float rowTopL, float rowTopR,
-                   float rowBtmL, float rowBtmR){
-    float SLOPE_PROB = 0.45;
-
+                   float xStart, float xW, float rowSeed,
+                   float b0L, float b0R, float b1L, float b1R){
     if(numCols < 1.5){
-        // 1列: 左辺=ページ左端, 右辺=ページ右端
         return vec4(xStart, xStart, xStart+xW, xStart+xW);
     }
-
-    // 分割比
+    float PROB = 0.45;
     float r = mix(0.30, 0.70, manga_hash_f(rowSeed));
+    float bcT, bcB;
+    if(manga_hash_f(rowSeed + 1.0) < PROB){
+        float s = (manga_hash_f(rowSeed + 2.0) - 0.5) * 0.5;
+        bcT = clamp(xStart + xW * (r - s * 0.5), xStart + xW*0.15, xStart + xW*0.85);
+        bcB = clamp(xStart + xW * (r + s * 0.5), xStart + xW*0.15, xStart + xW*0.85);
+    } else { bcT = xStart + xW * r; bcB = bcT; }
+    if(colIdx < 0.5) return vec4(xStart, xStart, bcT, bcB);
+    else             return vec4(bcT, bcB, xStart+xW, xStart+xW);
+}
 
-    // 列境界のx: 上辺(y=rowTop)と下辺(y=rowBtm)で異なるx
-    float bndX_top, bndX_btm;
-    if(manga_hash_f(rowSeed + 1.0) < SLOPE_PROB){
-        float slope = (manga_hash_f(rowSeed + 2.0) - 0.5) * 0.5;
-        bndX_top = clamp(xStart + xW * (r - slope * 0.5), xStart + xW*0.15, xStart + xW*0.85);
-        bndX_btm = clamp(xStart + xW * (r + slope * 0.5), xStart + xW*0.15, xStart + xW*0.85);
-    } else {
-        bndX_top = xStart + xW * r;
-        bndX_btm = bndX_top;
+// 行境界線 (y=hBndY(x)) と 列境界線 (x=vBndX(t), t=(y-topY(x))/h(x)) の交点を求める
+// 交点 (px, py) を返す。解けない場合は fallback
+vec2 manga_intersect(float hL0, float hR0, float hL1, float hR1,
+                     float cT, float cB){
+    // 上辺y: y0(x) = hL0 + (hR0-hL0)*x
+    // 下辺y: y1(x) = hL1 + (hR1-hL1)*x
+    // 列x:   x = cT + (cB-cT)*t,  t = (y-y0(x))/(y1(x)-y0(x))
+    // 联立: x = cT + (cB-cT)*(y-y0(x))/(y1(x)-y0(x))
+    // 数値的に二分法で解く(GLSLでループ可)
+    float lo = 0.0, hi = 1.0;
+    for(int i=0; i<16; i++){
+        float mid = (lo + hi) * 0.5;
+        float y0m = manga_hBndY(mid, hL0, hR0);
+        float y1m = manga_hBndY(mid, hL1, hR1);
+        float h   = y1m - y0m;
+        float x_at_mid = (h > 0.0001)
+            ? cT + (cB - cT) * (manga_hBndY(mid, hL0, hR0) + h * 0.5 - y0m) / h
+            : (cT + cB) * 0.5;
+        // より単純に: 上辺での交点
+        float t0 = (h > 0.0001) ? 0.0 : 0.5;
+        // 正しい式: t = (y_cross - y0(x)) / (y1(x)-y0(x)), x = cT+(cB-cT)*t を連立
+        // → x = cT + (cB-cT) * (y0(x)+t*(y1(x)-y0(x)) - y0(x)) / (y1(x)-y0(x))
+        //    = cT + (cB-cT) * t  でも t は y に依存 → 収束しない
+        // 別アプローチ: xを固定して t = (y-y0(x))/(y1-y0) を使い
+        //               x_required = cT+(cB-cT)*t を比較
+        float y_row_center = (y0m + y1m) * 0.5;
+        float t_mid = (h > 0.0001) ? (y_row_center - y0m) / h : 0.5;
+        float x_req = cT + (cB - cT) * t_mid;
+        if(x_req > mid) lo = mid; else hi = mid;
     }
-
-    // col=0: 左辺=ページ左端, 右辺=境界
-    // col=1: 左辺=境界, 右辺=ページ右端
-    if(colIdx < 0.5){
-        return vec4(xStart, xStart, bndX_top, bndX_btm);
-    } else {
-        return vec4(bndX_top, bndX_btm, xStart+xW, xStart+xW);
-    }
+    float px = (lo + hi) * 0.5;
+    float y0p = manga_hBndY(px, hL0, hR0);
+    float y1p = manga_hBndY(px, hL1, hR1);
+    float h   = y1p - y0p;
+    float t   = (h > 0.0001) ? clamp((cT + (cB-cT)*0.5 - y0p) / h, 0.0, 1.0) : 0.5;
+    // 実際はもっとシンプルに上辺/下辺での列x座標を直接使う
+    return vec2(px, y0p + t * h);
 }
 
-// 点(px,py)がコマ内かどうか
-// コマ = 4頂点の凸四角形（台形）
-// band: vec4(topL_y, topR_y, btmL_y, btmR_y) (行)
-// col:  vec4(xT_left, xB_left, xT_right, xB_right) (列)
-bool manga_inQuad(vec2 p,
-                  float topL, float topR,
-                  float btmL, float btmR,
-                  float leftT, float leftB,
-                  float rightT, float rightB){
-    // 行内: p.y が上辺と下辺の間
-    float yTop = manga_rowBandY(p.x, topL, topR);
-    float yBtm = manga_rowBandY(p.x, btmL, btmR);
-    if(p.y < yTop || p.y > yBtm) return false;
-    // 列内: p.x が左辺と右辺の間 (y位置でx補間)
-    float ty = (yBtm > yTop) ? clamp((p.y - yTop) / (yBtm - yTop), 0.0, 1.0) : 0.0;
-    float xLeft  = mix(leftT,  leftB,  ty);
-    float xRight = mix(rightT, rightB, ty);
-    return (p.x >= xLeft && p.x <= xRight);
+// コマの正確な4頂点を求める
+// P0=左上, P1=右上, P2=右下, P3=左下
+void manga_quadVerts(
+    float b0L, float b0R, float b1L, float b1R, // 行境界
+    float lT,  float lB,  float rT,  float rB,  // 列境界 (leftTop,leftBtm,rightTop,rightBtm)
+    out vec2 P0, out vec2 P1, out vec2 P2, out vec2 P3)
+{
+    // P0: 上辺(y=b0) と 左辺(x=lT..lB) の交点
+    // 上辺での y: y = b0L+(b0R-b0L)*x
+    // 左辺での x: x = lT+(lB-lT)*t, t=(y-b0Y(x))/(b1Y(x)-b0Y(x))
+    // 上辺上では t=0 なので x=lT, y=b0Y(lT)
+    P0 = vec2(lT, manga_hBndY(lT, b0L, b0R));
+    P1 = vec2(rT, manga_hBndY(rT, b0L, b0R));
+    P2 = vec2(rB, manga_hBndY(rB, b1L, b1R));
+    P3 = vec2(lB, manga_hBndY(lB, b1L, b1R));
 }
 
-// コマのAABB中心（コンテンツUV用）
-vec2 manga_quadCenter(float topL, float topR, float btmL, float btmR,
-                      float leftT, float leftB, float rightT, float rightB){
-    float cx = (leftT + leftB + rightT + rightB) * 0.25;
-    float cy = (topL + topR + btmL + btmR) * 0.25;
-    return vec2(cx, cy);
+// 点pがコマ内かどうか（4頂点の凸四角形、時計回り）
+bool manga_inQuad(vec2 p, vec2 P0, vec2 P1, vec2 P2, vec2 P3){
+    // 各辺に対して左側（内側）かチェック
+    // P0→P1→P2→P3 の順（時計回りなら右側が内側）
+    vec2 e0=P1-P0; vec2 e1=P2-P1; vec2 e2=P3-P2; vec2 e3=P0-P3;
+    float d0=cross(vec3(e0,0),vec3(p-P0,0)).z;
+    float d1=cross(vec3(e1,0),vec3(p-P1,0)).z;
+    float d2=cross(vec3(e2,0),vec3(p-P2,0)).z;
+    float d3=cross(vec3(e3,0),vec3(p-P3,0)).z;
+    return (d0<=0.0 && d1<=0.0 && d2<=0.0 && d3<=0.0)
+        || (d0>=0.0 && d1>=0.0 && d2>=0.0 && d3>=0.0);
 }
 
-// ページ内コマ検索
-// 戻り値: vec4(rowIdx, colIdx, panelId, hit)  hit=1ならヒット
+// コマ4辺への最小符号付きpx距離（正=内側）
+// P0(左上)→P1(右上)→P2(右下)→P3(左下): 時計回り
+// 辺 A→B の内側（右側）への距離 = -(e×(p-A))/|e|px
+//   e = B-A, cross2D(e,v) = e.x*v.y - e.y*v.x
+float manga_quadDist(vec2 uv, vec2 P0, vec2 P1, vec2 P2, vec2 P3, vec2 res){
+    vec2 e; float c; float lenPx;
+    #define EDGEDIST(A,B) (e=(B)-(A), lenPx=length(e*res), \
+        c=(e.x*(uv.y-(A).y)-e.y*(uv.x-(A).x)), \
+        (lenPx>0.0001 ? -c*res.x/lenPx : 1e9))
+    float d0=EDGEDIST(P0,P1);
+    float d1=EDGEDIST(P1,P2);
+    float d2=EDGEDIST(P2,P3);
+    float d3=EDGEDIST(P3,P0);
+    #undef EDGEDIST
+    return min(min(d0,d1),min(d2,d3));
+}
+
+// ページ内コマ検索: vec4(rowIdx, colIdx, panelId, hit)
 vec4 manga_pageHit2(vec2 uv, float xStart, float xW,
                     float numRows, float pageSeed,
                     float cols0, float cs0,
@@ -1111,110 +1134,64 @@ vec4 manga_pageHit2(vec2 uv, float xStart, float xW,
             if(fc2 >= nc) break;
             vec4 cb = manga_colBand(fc2, nc, xStart, xW, cs_row,
                                     rb.x, rb.y, rb.z, rb.w);
-            if(manga_inQuad(uv, rb.x, rb.y, rb.z, rb.w,
-                            cb.x, cb.y, cb.z, cb.w)){
+            vec2 P0,P1,P2,P3;
+            manga_quadVerts(rb.x,rb.y,rb.z,rb.w, cb.x,cb.y,cb.z,cb.w,
+                            P0,P1,P2,P3);
+            if(manga_inQuad(uv, P0,P1,P2,P3))
                 return vec4(fr, fc2, fr*4.0+fc2, 1.0);
-            }
         }
     }
-    return vec4(0.0, 0.0, -1.0, 0.0);
-}
-
-// 各辺への符号付きピクセル距離（正=内側）
-// 辺: 点A(ax,ay)→点B(bx,by) の左側が正
-float manga_edgeDist(vec2 p, vec2 A, vec2 B, vec2 res){
-    // UV空間での方向ベクトルをpxスケールに変換してから法線を計算
-    vec2 dPx = (B - A) * res;
-    vec2 nPx = normalize(vec2(-dPx.y, dPx.x));
-    vec2 pPx = p * res;
-    vec2 APx = A * res;
-    return dot(nPx, pPx - APx);
-}
-
-// コマの4辺への最小符号付きpx距離（正=内側）
-float manga_quadMinEdgeDist(vec2 uv,
-                            float topL, float topR,
-                            float btmL, float btmR,
-                            float leftT, float leftB,
-                            float rightT, float rightB,
-                            vec2 res){
-    // 4頂点: TL, TR, BR, BL
-    vec2 TL = vec2(0.0, topL);  // x=left端, y=top左
-    vec2 TR = vec2(1.0, topR);
-    vec2 BR = vec2(1.0, btmR);
-    vec2 BL = vec2(0.0, btmL);
-    // 列境界で実際の頂点を使う
-    // 上辺のleft-right: xはleftT〜rightT, yはtopL〜topR補間
-    // より正確な4頂点
-    float yTopLeft  = mix(topL, topR, leftT);
-    float yTopRight = mix(topL, topR, rightT);
-    float yBtmLeft  = mix(btmL, btmR, leftB);
-    float yBtmRight = mix(btmL, btmR, rightB);
-    vec2 P0 = vec2(leftT,  yTopLeft);   // 左上
-    vec2 P1 = vec2(rightT, yTopRight);  // 右上
-    vec2 P2 = vec2(rightB, yBtmRight);  // 右下
-    vec2 P3 = vec2(leftB,  yBtmLeft);   // 左下
-
-    float d0 = manga_edgeDist(uv, P0, P1, res); // 上辺
-    float d1 = manga_edgeDist(uv, P1, P2, res); // 右辺
-    float d2 = manga_edgeDist(uv, P2, P3, res); // 下辺
-    float d3 = manga_edgeDist(uv, P3, P0, res); // 左辺
-    return min(min(d0, d1), min(d2, d3));
+    return vec4(0.0,0.0,-1.0,0.0);
 }
 
 vec3 manga_renderCell(vec2 fc, vec4 rowBand, vec4 colBand,
                       float panelId, float timeIndex,
                       float sceneProgress, float animDuration,
                       float isBleed){
-    // rowBand: (topL, topR, btmL, btmR) — 行の上辺/下辺のx=0/1でのy座標
-    // colBand: (xT_left, xB_left, xT_right, xB_right) — 列の左辺/右辺のtop/btm側x座標
-
     float _short  = min(resolution.x, resolution.y);
     float INNER_X = _short * 0.05;
     float INNER_Y = INNER_X;
-    float SEP     = _short * 0.006; // 枠線外側余白（片側px）
+    float SEP     = _short * 0.006;
     float BD      = _short * 0.0028;
 
     vec2 fMin  = vec2(INNER_X, INNER_Y) / resolution;
     vec2 fMax  = vec2(1.0) - fMin;
     vec2 fSize = fMax - fMin;
+    vec2 uvRes = fSize * resolution;
 
-    // innerUV → 画面UV スケール
-    vec2 uvRes = fSize * resolution; // innerUV 1単位 = uvRes px
-
-    // 4頂点（innerUV空間）
     float topL  = rowBand.x; float topR  = rowBand.y;
     float btmL  = rowBand.z; float btmR  = rowBand.w;
     float leftT = colBand.x; float leftB = colBand.y;
     float rightT= colBand.z; float rightB= colBand.w;
 
-    // 断ち切り判定: 内枠端に接しているか（innerUV空間で0 or 1に近い）
-    float atL = step(min(leftT, leftB),   0.004);
-    float atR = step(0.996, max(rightT, rightB));
-    float atT = step(min(topL, topR),     0.004);
-    float atB = step(0.996, max(btmL, btmR));
+    // 断ち切り判定
+    float atL = step(leftT,  xStart + 0.004);  // xStartはない… innerUV空間なので
+    float atR = step(0.996, rightT);
+    float atT = step(min(topL,topR),   0.004);
+    float atB = step(0.996, max(btmL,btmR));
+    // xStartが不明なのでL/Rはx=0/1基準
+    atL = step(min(leftT,leftB), 0.004);
 
     float scrL = isBleed * atL;
     float scrR = isBleed * atR;
     float scrT = isBleed * atT;
     float scrB = isBleed * atB;
-    float edgL = atL; float edgR = atR;
-    float edgT = atT; float edgB = atB;
 
-    // 断ち切り: 接している辺を画面端まで拡張
-    if(scrL > 0.5){ leftT  = -fMin.x / fSize.x; leftB  = leftT; }
-    if(scrR > 0.5){ rightT =  fMax.x / fSize.x; rightB = rightT; }
-    if(scrT > 0.5){ topL   = -fMin.y / fSize.y; topR   = topL; }
-    if(scrB > 0.5){ btmL   =  fMax.y / fSize.y; btmR   = btmL; }
+    // 断ち切り拡張
+    if(scrL > 0.5){ leftT  = -fMin.x/fSize.x; leftB  = leftT; }
+    if(scrR > 0.5){ rightT = (1.0+fMin.x)/fSize.x; rightB = rightT; }
+    if(scrT > 0.5){ topL   = -fMin.y/fSize.y; topR   = topL; }
+    if(scrB > 0.5){ btmL   = (1.0+fMin.y)/fSize.y; btmR   = btmL; }
+
+    // 4頂点（innerUV空間）
+    vec2 P0,P1,P2,P3;
+    manga_quadVerts(topL,topR,btmL,btmR, leftT,leftB,rightT,rightB, P0,P1,P2,P3);
 
     vec2 uv = fc / resolution;
-    // innerUV（画面UV → innerUV空間）
     vec2 innerUV = (uv - fMin) / fSize;
 
     // コマ内判定
-    bool inside = manga_inQuad(innerUV,
-        topL, topR, btmL, btmR,
-        leftT, leftB, rightT, rightB);
+    bool inside = manga_inQuad(innerUV, P0,P1,P2,P3);
 
     // アニメーション
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
@@ -1240,8 +1217,7 @@ vec3 manga_renderCell(vec2 fc, vec4 rowBand, vec4 colBand,
         aInnerUV = innerUV - slideDir * (1.0 - ep) * 0.4;
     } else {
         // ポップアップ: コマ中心からスケール
-        vec2 center = manga_quadCenter(topL, topR, btmL, btmR,
-                                       leftT, leftB, rightT, rightB);
+        vec2 center = (P0+P1+P2+P3)*0.25;
         float epB = manga_easeOutElastic(prog);
         float sc  = max(epB, 0.001);
         aInnerUV  = (innerUV - center) / sc + center;
@@ -1251,47 +1227,33 @@ vec3 manga_renderCell(vec2 fc, vec4 rowBand, vec4 colBand,
 
     // ポップアップ: スケール後にinside再判定
     bool aInside = inside;
+    vec2 center = (P0+P1+P2+P3) * 0.25;
     if(animType >= 1.5){
-        vec2 center = manga_quadCenter(topL, topR, btmL, btmR,
-                                       leftT, leftB, rightT, rightB);
         float epB = manga_easeOutElastic(prog);
         float sc  = clamp(epB, 0.001, 2.0);
-        // 縮小したコマ内にいるか
-        float tL2 = center.x + (leftT  - center.x) * sc;
-        float bL2 = center.x + (leftB  - center.x) * sc;
-        float tR2 = center.x + (rightT - center.x) * sc;
-        float bR2 = center.x + (rightB - center.x) * sc;
-        float tpL2 = center.y + (topL - center.y) * sc;
-        float tpR2 = center.y + (topR - center.y) * sc;
-        float bmL2 = center.y + (btmL - center.y) * sc;
-        float bmR2 = center.y + (btmR - center.y) * sc;
-        aInside = manga_inQuad(innerUV,
-            tpL2, tpR2, bmL2, bmR2,
-            tL2, bL2, tR2, bR2);
+        vec2 sP0 = center + (P0-center)*sc;
+        vec2 sP1 = center + (P1-center)*sc;
+        vec2 sP2 = center + (P2-center)*sc;
+        vec2 sP3 = center + (P3-center)*sc;
+        aInside = manga_inQuad(innerUV, sP0,sP1,sP2,sP3);
     }
 
     if(!aInside) return vec3(1.0);
 
     // スライドイン: aInnerUVがコマ外なら白
     if(animType >= 0.5 && animType < 1.5){
-        bool aIn = manga_inQuad(aInnerUV,
-            topL, topR, btmL, btmR,
-            leftT, leftB, rightT, rightB);
-        if(!aIn) return vec3(1.0);
+        if(!manga_inQuad(aInnerUV, P0,P1,P2,P3)) return vec3(1.0);
     }
 
-    // コンテンツUV（innerUV空間でのコマのAABBに正規化）
-    vec2 quadMin = vec2(min(leftT, leftB), min(topL, topR));
-    vec2 quadMax = vec2(max(rightT, rightB), max(btmL, btmR));
+    // コンテンツUV（コマのAABBに正規化）
+    vec2 quadMin = min(min(P0,P1),min(P2,P3));
+    vec2 quadMax = max(max(P0,P1),max(P2,P3));
     vec2 cellUV = clamp((aInnerUV - quadMin) / max(quadMax - quadMin, vec2(0.001)), 0.0, 1.0);
     manga_initSeed3(vec3(panelId, timeIndex, 13.3));
     vec3 col = manga_mainAgg(cellUV, manga_random(), time);
 
-    // 枠線: 4辺への最小pxDistで判定
-    float dist = manga_quadMinEdgeDist(innerUV,
-        topL, topR, btmL, btmR,
-        leftT, leftB, rightT, rightB,
-        uvRes);
+    // 枠線: 4頂点で定義した各辺への最小pxDist
+    float dist = manga_quadDist(innerUV, P0,P1,P2,P3, uvRes);
 
     float mSep = SEP;
     float mBD  = BD;
