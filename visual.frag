@@ -1326,12 +1326,12 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
     // まずコマ内容（フェード）
     vec3 res = mix(vec3(1.0), col, fadeAlpha);
 
-    // 最前面でガター白を確定（灰色化を避ける）
-    res = mix(res, vec3(1.0), whiteMask);
-
-    // 最前面で枠線を上書き（白マスクに負けない）
-    float borderInk = smoothstep(0.20, 1.0, inBd); // エッジを少し締める
+    // 枠線（境界中心に3px: ±1.5px）を先に描く
+    float borderInk = smoothstep(0.20, 1.0, inBd);
     res = mix(res, vec3(0.0), borderInk * fadeAlpha);
+
+    // 白マスクを最前面で確定（灰色化を避ける）
+    res = mix(res, vec3(1.0), whiteMask);
     return res;
 }
 vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, float pageSeed,
@@ -1362,30 +1362,53 @@ vec3 manga_renderPage(vec2 fc, vec2 uv, vec2 innerUV, float xStart, float xW, fl
     vec4 cb = manga_colBand(colIdx, nc, xStart, xW, cs_row,
                              rb.x, rb.y, rb.z, rb.w);
 
-    // 裁ち切り判定: 内枠外ピクセルはコマの辺がページ端に接している場合のみ通す
+    // =============================
+    // 断ち切り（コマ単位で切替） ※v11方式
+    //   - 通常: 内枠(5%)に収める（内枠外は白）
+    //   - 断ち切り指定のときだけ: その側を画面端まで伸ばす
+    // =============================
     float _s3   = min(resolution.x, resolution.y);
-    float _inn3 = _s3 * 0.05;
-    vec2 pfMin3 = vec2(_inn3) / resolution;
-    vec2 pfMax3 = vec2(1.0) - pfMin3;
-    float eps   = 0.02;
+    float INNER = _s3 * 0.05;
+    vec2 fMin3  = vec2(INNER) / resolution;
+    vec2 fMax3  = vec2(1.0) - fMin3;
+    vec2 fSize3 = fMax3 - fMin3;
 
-    
-    // --- BLEED (裁ち切り) ---
-    // 端まで延びる“断ち切りコマ”を確率で発生させる（内枠ではなく画面端）
-    const float BLEED_PROB = 0.18; // 好みで調整
-    manga_initSeed3(vec3(panelId, timeIndex, 99.1));
-    float bleedRng = manga_random();
-    bool bleedOn = (bleedRng < BLEED_PROB);
+    // 画面端に対応する innerUV_raw 座標（clamp前）
+    float extL = -fMin3.x / fSize3.x;
+    float extR =  1.0 + fMin3.x / fSize3.x;
+    float extT = -fMin3.y / fSize3.y;
+    float extB =  1.0 + fMin3.y / fSize3.y;
 
-    // そのセルが内枠の端に接している場合のみ、その方向を“画面端まで許可”する
-    bool bleedL = bleedOn && (min(cb.x, cb.y) <= eps);
-    bool bleedR = bleedOn && (max(cb.z, cb.w) >= 1.0 - eps);
-    bool bleedB = bleedOn && (min(rb.x, rb.y) <= eps);
-    bool bleedT = bleedOn && (max(rb.z, rb.w) >= 1.0 - eps);
-if(uv.x < pfMin3.x && min(cb.x, cb.y) > eps)      return vec3(1.0);
-    if(uv.x > pfMax3.x && max(cb.z, cb.w) < 1.0 - eps) return vec3(1.0);
-    if(uv.y < pfMin3.y && min(rb.x, rb.y) > eps)                return vec3(1.0);
-    if(uv.y > pfMax3.y && max(rb.z, rb.w) < 1.0 - eps)         return vec3(1.0);
+    // 外周かどうか（ワイド時のガター側へは伸ばさない）
+    bool outerLeft  = (abs(xStart - 0.0) < 1e-4);
+    bool outerRight = (abs((xStart + xW) - 1.0) < 1e-4);
+
+    bool isLeftMost  = (colIdx < 0.5);
+    bool isRightMost = (colIdx > (nc - 1.5));
+    bool isTopMost   = (rowIdx < 0.5);
+    bool isBotMost   = (rowIdx > (numRows - 1.5));
+
+    // コマごとに断ち切りフラグ（確率）
+    manga_initSeed3(vec3(panelId, timeIndex, 123.4));
+    float pBleed = 0.28; // 断ち切り率（好みで調整）
+    bool bleedL = outerLeft  && isLeftMost  && (manga_random() < pBleed);
+    bool bleedR = outerRight && isRightMost && (manga_random() < pBleed);
+    bool bleedT = isTopMost  && (manga_random() < pBleed);
+    bool bleedB = isBotMost  && (manga_random() < pBleed);
+
+    // 断ち切りしない側の内枠外は白
+    if(uv.x < fMin3.x && !bleedL) return vec3(1.0);
+    if(uv.x > fMax3.x && !bleedR) return vec3(1.0);
+    if(uv.y < fMin3.y && !bleedT) return vec3(1.0);
+    if(uv.y > fMax3.y && !bleedB) return vec3(1.0);
+
+    // 断ち切りする側は、該当辺を「画面端相当のinnerUV_raw」まで拡張
+    vec4 rb2 = rb;
+    vec4 cb2 = cb;
+    if(bleedL){ cb2.x = extL; cb2.y = extL; }
+    if(bleedR){ cb2.z = extR; cb2.w = extR; }
+    if(bleedT){ rb2.x = extT; rb2.y = extT; }
+    if(bleedB){ rb2.z = extB; rb2.w = extB; }
 
     return manga_renderCell(innerUV, rb, cb,
                             panelId + pageSeed * 0.01,
