@@ -1064,10 +1064,13 @@ bool manga_inQuad(vec2 p, vec2 P0, vec2 P1, vec2 P2, vec2 P3){
 // 辺 A→B の内側（右側）への距離 = -(e×(p-A))/|e|px
 //   e = B-A, cross2D(e,v) = e.x*v.y - e.y*v.x
 float manga_edgePxDist(vec2 uv, vec2 A, vec2 B, vec2 res){
-    vec2 e = B - A;
-    float lenPx = length(e * res);
-    float c = e.x*(uv.y-A.y) - e.y*(uv.x-A.x);
-    return (lenPx > 0.0001) ? c * res.x / lenPx : 9999.0;
+    // res は innerUV(0..1) を px に変換するスケール（例: uvRes）
+    // ピクセル空間で符号付き距離を計算して、線幅が曲がったりムラにならないようにする
+    vec2 ePx = (B - A) * res;
+    vec2 vPx = (uv - A) * res;
+    float lenPx = length(ePx);
+    float cPx = ePx.x * vPx.y - ePx.y * vPx.x; // 2D cross in px space
+    return (lenPx > 0.0001) ? (cPx / lenPx) : 9999.0;
 }
 
 float manga_quadDist(vec2 uv, vec2 P0, vec2 P1, vec2 P2, vec2 P3, vec2 res){
@@ -1165,9 +1168,13 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
                       float sceneProgress, float animDuration,
                       float bleedL, float bleedR, float bleedT, float bleedB){
     float _short = min(resolution.x, resolution.y);
-    float SEP    = _short * 0.006;
-    float BD_V   = _short * 0.0028 + 1.0; // 縦線 +1px
-    float BD_H   = BD_V * 4.0;        // 横線は縦線の4倍
+
+    // 余白(ガター)の比率：横(行間)が縦(列間)の4倍
+    float SEP_V  = _short * 0.006;     // 縦のコマ間（左右方向の隙間）
+    float SEP_H  = SEP_V * 4.0;        // 横のコマ間（上下方向の隙間）= 4倍
+
+    // 枠線の太さは均一（ここは増やさない）
+    float BD     = _short * 0.0028 + 1.0; // +1pxは見えの安定化
 
     // innerUV空間(0..1)での頂点
     vec2 P0 = manga_quadP0(rowBand.x, rowBand.y, colBand.x);
@@ -1232,25 +1239,25 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
     vec2 uvRes    = fSize * resolution;
 
     // 各辺の距離（px）
-    float dTop = manga_edgePxDist(innerUV, P0, P1, uvRes) * uvRes.x;
-    float dRgt = manga_edgePxDist(innerUV, P1, P2, uvRes) * uvRes.x;
-    float dBot = manga_edgePxDist(innerUV, P2, P3, uvRes) * uvRes.x;
-    float dLft = manga_edgePxDist(innerUV, P3, P0, uvRes) * uvRes.x;
+    float dTop = manga_edgePxDist(innerUV, P0, P1, uvRes);
+    float dRgt = manga_edgePxDist(innerUV, P1, P2, uvRes);
+    float dBot = manga_edgePxDist(innerUV, P2, P3, uvRes);
+    float dLft = manga_edgePxDist(innerUV, P3, P0, uvRes);
 
     float aa   = 1.0; // AA 1px
 
     // 余白（コマ間）: dist < SEP → 白。ただし断ち切り側は余白を作らない
-    float wTop = (bleedT < 0.5) ? (1.0 - smoothstep(SEP - aa, SEP + aa, dTop)) : 0.0;
-    float wRgt = (bleedR < 0.5) ? (1.0 - smoothstep(SEP - aa, SEP + aa, dRgt)) : 0.0;
-    float wBot = (bleedB < 0.5) ? (1.0 - smoothstep(SEP - aa, SEP + aa, dBot)) : 0.0;
-    float wLft = (bleedL < 0.5) ? (1.0 - smoothstep(SEP - aa, SEP + aa, dLft)) : 0.0;
+    float wTop = (bleedT < 0.5) ? (1.0 - smoothstep(SEP_H - aa, SEP_H + aa, dTop)) : 0.0;
+    float wRgt = (bleedR < 0.5) ? (1.0 - smoothstep(SEP_V - aa, SEP_V + aa, dRgt)) : 0.0;
+    float wBot = (bleedB < 0.5) ? (1.0 - smoothstep(SEP_H - aa, SEP_H + aa, dBot)) : 0.0;
+    float wLft = (bleedL < 0.5) ? (1.0 - smoothstep(SEP_V - aa, SEP_V + aa, dLft)) : 0.0;
     float whiteMask = max(max(wTop, wRgt), max(wBot, wLft));
 
     // 枠線: SEP..SEP+BD が黒。ただし断ち切り側は枠線を描かない（画面端で消える）
-    float bTop = (bleedT < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dTop) * (1.0 - smoothstep(SEP+BD_H-aa, SEP+BD_H+aa, dTop))) : 0.0;
-    float bRgt = (bleedR < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dRgt) * (1.0 - smoothstep(SEP+BD_V-aa, SEP+BD_V+aa, dRgt))) : 0.0;
-    float bBot = (bleedB < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dBot) * (1.0 - smoothstep(SEP+BD_H-aa, SEP+BD_H+aa, dBot))) : 0.0;
-    float bLft = (bleedL < 0.5) ? (smoothstep(SEP-aa, SEP+aa, dLft) * (1.0 - smoothstep(SEP+BD_V-aa, SEP+BD_V+aa, dLft))) : 0.0;
+    float bTop = (bleedT < 0.5) ? (smoothstep(SEP_H-aa, SEP_H+aa, dTop) * (1.0 - smoothstep(SEP_H+BD-aa, SEP_H+BD+aa, dTop))) : 0.0;
+    float bRgt = (bleedR < 0.5) ? (smoothstep(SEP_V-aa, SEP_V+aa, dRgt) * (1.0 - smoothstep(SEP_V+BD-aa, SEP_V+BD+aa, dRgt))) : 0.0;
+    float bBot = (bleedB < 0.5) ? (smoothstep(SEP_H-aa, SEP_H+aa, dBot) * (1.0 - smoothstep(SEP_H+BD-aa, SEP_H+BD+aa, dBot))) : 0.0;
+    float bLft = (bleedL < 0.5) ? (smoothstep(SEP_V-aa, SEP_V+aa, dLft) * (1.0 - smoothstep(SEP_V+BD-aa, SEP_V+BD+aa, dLft))) : 0.0;
     float inBd = max(max(bTop, bRgt), max(bBot, bLft));
 
     vec3 res = mix(col, vec3(0.0), inBd * fadeAlpha);
