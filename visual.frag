@@ -1083,27 +1083,80 @@ vec4 manga_pageHit2(vec2 uv, float xStart, float xW,
                     float cols0, float cs0,
                     float cols1, float cs1,
                     float cols2, float cs2){
-    for(int row=0; row<3; row++){
-        float fr = float(row);
-        if(fr >= numRows) break;
-        vec4 rb = manga_rowBand(fr, numRows, pageSeed);
+    // GLSL ES 1.00: breakなし、continueなし、条件はif文で制御
+    vec4 result = vec4(0.0, 0.0, -1.0, 0.0);
+    // row 0
+    {
+        vec4 rb = manga_rowBand(0.0, numRows, pageSeed);
         float nc = cols0; float cs_row = cs0;
-        if(fr > 0.5){ nc=cols1; cs_row=cs1; }
-        if(fr > 1.5){ nc=cols2; cs_row=cs2; }
-        for(int col=0; col<2; col++){
-            float fc2 = float(col);
-            if(fc2 >= nc) break;
-            vec4 cb = manga_colBand(fc2, nc, xStart, xW, cs_row,
-                                    rb.x, rb.y, rb.z, rb.w);
+        // col 0
+        {
+            vec4 cb = manga_colBand(0.0, nc, xStart, xW, cs_row, rb.x,rb.y,rb.z,rb.w);
             vec2 P0=manga_quadP0(rb.x,rb.y,cb.x);
             vec2 P1=manga_quadP1(rb.x,rb.y,cb.z);
             vec2 P2=manga_quadP2(rb.z,rb.w,cb.w);
             vec2 P3=manga_quadP3(rb.z,rb.w,cb.y);
-            if(manga_inQuad(uv, P0,P1,P2,P3))
-                return vec4(fr, fc2, fr*4.0+fc2, 1.0);
+            if(result.w < 0.5 && manga_inQuad(uv,P0,P1,P2,P3))
+                result = vec4(0.0, 0.0, 0.0, 1.0);
+        }
+        // col 1
+        if(nc > 1.5){
+            vec4 cb = manga_colBand(1.0, nc, xStart, xW, cs_row, rb.x,rb.y,rb.z,rb.w);
+            vec2 P0=manga_quadP0(rb.x,rb.y,cb.x);
+            vec2 P1=manga_quadP1(rb.x,rb.y,cb.z);
+            vec2 P2=manga_quadP2(rb.z,rb.w,cb.w);
+            vec2 P3=manga_quadP3(rb.z,rb.w,cb.y);
+            if(result.w < 0.5 && manga_inQuad(uv,P0,P1,P2,P3))
+                result = vec4(0.0, 1.0, 1.0, 1.0);
         }
     }
-    return vec4(0.0,0.0,-1.0,0.0);
+    // row 1
+    if(numRows > 1.5){
+        vec4 rb = manga_rowBand(1.0, numRows, pageSeed);
+        float nc = cols1; float cs_row = cs1;
+        {
+            vec4 cb = manga_colBand(0.0, nc, xStart, xW, cs_row, rb.x,rb.y,rb.z,rb.w);
+            vec2 P0=manga_quadP0(rb.x,rb.y,cb.x);
+            vec2 P1=manga_quadP1(rb.x,rb.y,cb.z);
+            vec2 P2=manga_quadP2(rb.z,rb.w,cb.w);
+            vec2 P3=manga_quadP3(rb.z,rb.w,cb.y);
+            if(result.w < 0.5 && manga_inQuad(uv,P0,P1,P2,P3))
+                result = vec4(1.0, 0.0, 4.0, 1.0);
+        }
+        if(nc > 1.5){
+            vec4 cb = manga_colBand(1.0, nc, xStart, xW, cs_row, rb.x,rb.y,rb.z,rb.w);
+            vec2 P0=manga_quadP0(rb.x,rb.y,cb.x);
+            vec2 P1=manga_quadP1(rb.x,rb.y,cb.z);
+            vec2 P2=manga_quadP2(rb.z,rb.w,cb.w);
+            vec2 P3=manga_quadP3(rb.z,rb.w,cb.y);
+            if(result.w < 0.5 && manga_inQuad(uv,P0,P1,P2,P3))
+                result = vec4(1.0, 1.0, 5.0, 1.0);
+        }
+    }
+    // row 2
+    if(numRows > 2.5){
+        vec4 rb = manga_rowBand(2.0, numRows, pageSeed);
+        float nc = cols2; float cs_row = cs2;
+        {
+            vec4 cb = manga_colBand(0.0, nc, xStart, xW, cs_row, rb.x,rb.y,rb.z,rb.w);
+            vec2 P0=manga_quadP0(rb.x,rb.y,cb.x);
+            vec2 P1=manga_quadP1(rb.x,rb.y,cb.z);
+            vec2 P2=manga_quadP2(rb.z,rb.w,cb.w);
+            vec2 P3=manga_quadP3(rb.z,rb.w,cb.y);
+            if(result.w < 0.5 && manga_inQuad(uv,P0,P1,P2,P3))
+                result = vec4(2.0, 0.0, 8.0, 1.0);
+        }
+        if(nc > 1.5){
+            vec4 cb = manga_colBand(1.0, nc, xStart, xW, cs_row, rb.x,rb.y,rb.z,rb.w);
+            vec2 P0=manga_quadP0(rb.x,rb.y,cb.x);
+            vec2 P1=manga_quadP1(rb.x,rb.y,cb.z);
+            vec2 P2=manga_quadP2(rb.z,rb.w,cb.w);
+            vec2 P3=manga_quadP3(rb.z,rb.w,cb.y);
+            if(result.w < 0.5 && manga_inQuad(uv,P0,P1,P2,P3))
+                result = vec4(2.0, 1.0, 9.0, 1.0);
+        }
+    }
+    return result;
 }
 
 vec3 manga_renderCell(vec2 fc, vec4 rowBand, vec4 colBand,
