@@ -1067,7 +1067,7 @@ float manga_edgePxDist(vec2 uv, vec2 A, vec2 B, vec2 res){
     vec2 e = B - A;
     float lenPx = length(e * res);
     float c = e.x*(uv.y-A.y) - e.y*(uv.x-A.x);
-    return (lenPx > 0.0001) ? -c * res.x / lenPx : 9999.0;
+    return (lenPx > 0.0001) ? c * res.x / lenPx : 9999.0;
 }
 
 float manga_quadDist(vec2 uv, vec2 P0, vec2 P1, vec2 P2, vec2 P3, vec2 res){
@@ -1163,20 +1163,17 @@ vec4 manga_pageHit2(vec2 uv, float xStart, float xW,
 vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
                       float panelId, float timeIndex,
                       float sceneProgress, float animDuration){
-    // DEBUG最小版: panelIdで色返し
-    float h = fract(panelId * 0.137 + 0.1);
-    return 0.5 + 0.5*cos(vec3(0.0,2.0,4.0) + h*6.28318);
-
     float _short = min(resolution.x, resolution.y);
     float SEP    = _short * 0.006;
     float BD     = _short * 0.0028;
 
+    // innerUV空間(0..1)での頂点
     vec2 P0 = manga_quadP0(rowBand.x, rowBand.y, colBand.x);
     vec2 P1 = manga_quadP1(rowBand.x, rowBand.y, colBand.z);
     vec2 P2 = manga_quadP2(rowBand.z, rowBand.w, colBand.w);
     vec2 P3 = manga_quadP3(rowBand.z, rowBand.w, colBand.y);
 
-    if(!manga_inQuad(innerUV, P0,P1,P2,P3)) return vec3(1.0);
+    // inQuadチェックをスキップ（pageHit2が保証）
 
     // アニメーション
     manga_initSeed3(vec3(panelId, timeIndex, 7.7));
@@ -1198,7 +1195,7 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
         vec2 sd = (dr<0.25) ? vec2(-1.0,0.0) : (dr<0.5) ? vec2(1.0,0.0) :
                   (dr<0.75) ? vec2(0.0,-1.0) : vec2(0.0,1.0);
         aUV = innerUV - sd*(1.0-ep)*0.4;
-        if(!manga_inQuad(aUV, P0,P1,P2,P3)) return vec3(1.0);
+        fadeAlpha = ep;
     } else {
         // ポップアップ
         float epB = manga_easeOutElastic(prog);
@@ -1225,7 +1222,8 @@ vec3 manga_renderCell(vec2 innerUV, vec4 rowBand, vec4 colBand,
     vec2 fSize    = vec2(1.0) - 2.0*vec2(INNER)/resolution;
     vec2 uvRes    = fSize * resolution;
 
-    float dist = manga_quadDist(innerUV, P0,P1,P2,P3, uvRes);
+    // quadDistはUV単位を返すのでuvRes.xをかけてpx単位に変換
+    float dist = manga_quadDist(innerUV, P0,P1,P2,P3, uvRes) * uvRes.x;
     float aa   = 0.8;
     float inSep = 1.0 - smoothstep(SEP-aa, SEP+aa, dist);
     float inBd  = smoothstep(SEP-aa,SEP+aa,dist)*(1.0-smoothstep(SEP+BD-aa,SEP+BD+aa,dist));
